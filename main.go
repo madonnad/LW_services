@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,6 +21,15 @@ const (
 
 type PGPool struct {
 	pool *pgxpool.Pool
+}
+
+type WSConn struct {
+	conn *websocket.Conn
+	uid  uuid.UUID
+}
+
+type WSPool struct {
+	pool []WSConn
 }
 
 func CreatePostgresPool(connString string) (*PGPool, error) {
@@ -46,8 +57,12 @@ func main() {
 	port := "2525"
 	serverString := fmt.Sprintf("%v:%v", host, port)
 
+	var wsPool WSPool
+	wsPool.pool = make([]WSConn, 0)
+
 	//Route Register
 	http.HandleFunc("/", connPool.GETHandlerRoot)
+	http.HandleFunc("/ws", wsPool.WebSocketHandler)
 	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

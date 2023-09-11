@@ -50,7 +50,7 @@ func (connPool *PGPool) GETAlbumsByUID(w http.ResponseWriter, r *http.Request) {
 		var album Album
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID)
-		fmt.Printf("%v", err)
+
 		if err != nil {
 			log.Panic(err)
 		}
@@ -132,5 +132,4 @@ func writeErrorToWriter(w http.ResponseWriter, errorString string) {
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
-	return
 }
