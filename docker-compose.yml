@@ -20,7 +20,7 @@ services:
     ports:
       - 5432:5432
     environment:
-      POSTGRES_DB: "nw_db"
+      POSTGRES_DB: "lw_db"
       POSTGRES_USER: "dmadonna"
       POSTGRES_PASSWORD: "1425"
     volumes:
