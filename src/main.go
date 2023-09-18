@@ -17,7 +17,7 @@ const (
 	port     = 5432
 	user     = "dmadonna"
 	password = "1425"
-	dbname   = "nw_db"
+	dbname   = "lw_db"
 )
 
 func CreatePostgresPool(connString string, context context.Context) (*m.PGPool, error) {
