@@ -34,6 +34,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 		fmt.Fprintf(w, "failed to upgrade websocket: %s", err)
 		return
 	}
+
 	log.Print("Listening via WebSocket...")
 	queryTime := time.Now().UTC()
 	updatedTime := queryTime
@@ -49,6 +50,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 		}
 		time.Sleep(4 * time.Second)
 		queryTime = updatedTime
+
 	}
 
 }
@@ -90,6 +92,7 @@ func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket
 	var wsPayload WebSocketPayload
 	var user User
 	var receivedLocal time.Time
+
 	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
 						  FROM users u
 						  JOIN friend_requests fr ON fr.sender_id = u.user_id
@@ -163,8 +166,20 @@ func writeNotification(conn *websocket.Conn, n WebSocketPayload) error {
 		return err
 	}
 	err = conn.WriteMessage(websocket.TextMessage, responseBytes)
-	if err == nil {
-		log.Printf("Sent: %v, Operation: %v, Received At: %v\n", n.Type, n.Operation, n.Received)
+
+	if err != nil {
+		if websocket.IsUnexpectedCloseError(err) {
+			log.Println("Warning: The server unexpectedly closed!")
+			conn.Close()
+			return
+		}
+		log.Print(err)
+		return
+	}
+	log.Printf("Sent: %v, Operation: %v, Received At: %v\n", n.Type, n.Operation, n.Received)
+	if err != nil {
+		log.Print(err)
+
 	}
 	return err
 }

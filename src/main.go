@@ -65,6 +65,19 @@ func main() {
 			h.POSTNewAlbum(w, r, connPool)
 		}
 	})
+	http.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/images/ofuser" {
+			h.GETImagesFromUserID(w, r, connPool, ctx)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			h.GETImageFromID(w, r, connPool, ctx)
+		case http.MethodPost:
+			h.POSTNewImage(w, r, connPool, ctx)
+		}
+	})
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
