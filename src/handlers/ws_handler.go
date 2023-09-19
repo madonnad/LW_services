@@ -18,6 +18,11 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1048,
 }
 
+type ConnectionState struct {
+	Conn   *websocket.Conn
+	Active bool
+}
+
 type WebSocketPayload struct {
 	Operation string      `json:"operation"`
 	Type      string      `json:"type"`
@@ -35,24 +40,57 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 		return
 	}
 
+	var newConnection ConnectionState = ConnectionState{Conn: conn, Active: true}
+
 	log.Print("Listening via WebSocket...")
+	go newConnection.QueryAndWrite(ctx, connPool, conn)
+	go newConnection.CheckConnectionStatus(ctx, conn)
+
+}
+
+func (connectionState *ConnectionState) QueryAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn) {
 	queryTime := time.Now().UTC()
 	updatedTime := queryTime
-	for {
-		if err := AlbumRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime); err != nil {
+
+	for connectionState.Active == true {
+		log.Printf("Status: %v", connectionState.Active)
+
+		err := AlbumRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime)
+		if err != nil {
 			log.Printf("failed to check album notifications: %s", err)
 		}
-		if err := FriendRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime); err != nil {
+		err = FriendRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime)
+		if err != nil {
 			log.Printf("failed to check friend requests: %s", err)
 		}
-		if err := NotificationCheck(ctx, connPool, conn, &queryTime, &updatedTime); err != nil {
+		err = NotificationCheck(ctx, connPool, conn, &queryTime, &updatedTime)
+		if err != nil {
 			log.Printf("failed to check generic notifications: %s", err)
 		}
+
 		time.Sleep(4 * time.Second)
 		queryTime = updatedTime
 
-	}
+		log.Print("Hello")
 
+	}
+	log.Print("The WebSocket is closing..")
+	conn.Close()
+	return
+}
+
+func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn) {
+
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err) {
+				log.Printf("error: %v", err)
+				connectionState.Active = false
+				break
+			}
+		}
+	}
 }
 
 func AlbumRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
@@ -171,10 +209,10 @@ func writeNotification(conn *websocket.Conn, n WebSocketPayload) error {
 		if websocket.IsUnexpectedCloseError(err) {
 			log.Println("Warning: The server unexpectedly closed!")
 			conn.Close()
-			return
+			return err
 		}
 		log.Print(err)
-		return
+		return err
 	}
 	log.Printf("Sent: %v, Operation: %v, Received At: %v\n", n.Type, n.Operation, n.Received)
 	if err != nil {
