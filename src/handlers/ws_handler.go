@@ -87,7 +87,7 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 			if websocket.IsUnexpectedCloseError(err) {
 				log.Printf("error: %v", err)
 				connectionState.Active = false
-				break
+				return
 			}
 		}
 	}
