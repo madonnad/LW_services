@@ -31,6 +31,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 	if err != nil {
 		log.Print(err)
 	}
+
 	log.Print("Listening via WebSocket...")
 	queryTime := time.Now().UTC()
 	updatedTime := queryTime
@@ -42,6 +43,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 
 		time.Sleep(4 * time.Second)
 		queryTime = updatedTime
+
 	}
 
 }
@@ -85,7 +87,7 @@ func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket
 	var user User
 	var receivedLocal time.Time
 
-	log.Print(queryTime)
+	//log.Print(queryTime)
 
 	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
 						  FROM users u
@@ -159,6 +161,15 @@ func HandleNotifications(conn *websocket.Conn, n WebSocketPayload) {
 	}
 
 	err = conn.WriteMessage(websocket.TextMessage, responseBytes)
+	if err != nil {
+		if websocket.IsUnexpectedCloseError(err) {
+			log.Println("Warning: The server unexpectedly closed!")
+			conn.Close()
+			return
+		}
+		log.Print(err)
+		return
+	}
 	log.Printf("Sent: %v, Operation: %v, Received At: %v\n", n.Type, n.Operation, n.Received)
 	if err != nil {
 		log.Print(err)
