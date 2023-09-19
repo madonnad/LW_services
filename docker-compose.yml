@@ -1,21 +1,6 @@
 services:
-  app:
-    build: .
-    ports:
-      - '2525:2525'
-    environment:
-      POSTGRES_DB: "nw_db"
-      POSTGRES_HOST: "0.0.0.0"
-      POSTGRES_PORT: "5432:5432"
-      POSTGRES_USER: "dmadonna"
-      POSTGRES_PASSWORD: "1425"
-    depends_on:
-      - postgres
-    volumes:
-      - ./app:/code/app
-
   postgres:
-    image: postgres:15
+    image: postgres:16.0
     restart: always
     ports:
       - 5432:5432

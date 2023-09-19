@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -30,22 +29,19 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) 
 
 	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
 	if err != nil {
-		var errorString string = fmt.Sprintln("Error: Provide a unique, valid UUID to return a user")
-		responseBytes := []byte(errorString)
+		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user")
 
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write(responseBytes)
 		return
 	}
 
-	sqlQuery := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
-					FROM albums a
-					JOIN albumuser au
-					ON au.album_id=a.album_id
-					WHERE au.user_id=$1`
-	response, err := connPool.Pool.Query(context.Background(), sqlQuery, uid)
+	query := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
+				 FROM albums a
+				 JOIN albumuser au
+				 ON au.album_id=a.album_id
+				 WHERE au.user_id=$1`
+	response, err := connPool.Pool.Query(context.Background(), query, uid)
 	if err != nil {
-		log.Panic(err)
+		log.Print(err)
 	}
 
 	for response.Next() {
@@ -54,7 +50,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) 
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID)
 
 		if err != nil {
-			log.Panic(err)
+			log.Print(err)
 		}
 		albums = append(albums, album)
 	}
@@ -83,7 +79,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) 
 }
 
 func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
-	var album []Album
+	album := Album{}
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -100,12 +96,12 @@ func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 		return
 	}
 
-	sqlQuery := `INSERT INTO albums
+	query := `INSERT INTO albums
 				  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
 				  VALUES ($1, $2, $3, $4, $5, $6) RETURNING album_id, created_at`
-	err = connPool.Pool.QueryRow(context.Background(), sqlQuery,
-		album[0].AlbumName, album[0].AlbumOwner, album[0].AlbumCoverID, album[0].LockedAt,
-		album[0].UnlockedAt, album[0].RevealedAt).Scan(&album[0].AlbumID, &album[0].CreatedAt)
+	err = connPool.Pool.QueryRow(context.Background(), query,
+		album.AlbumName, album.AlbumOwner, album.AlbumCoverID, album.LockedAt,
+		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt)
 	if err != nil {
 		log.Print(err)
 		return
@@ -113,7 +109,7 @@ func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 
 	insertResponse, err := json.MarshalIndent(album, "", "\t")
 	if err != nil {
-		log.Panic(err)
+		log.Print(err)
 		return
 	}
 	responseBytes := []byte(insertResponse)
@@ -126,7 +122,7 @@ func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 func writeErrorToWriter(w http.ResponseWriter, errorString string) {
 	jsonString, err := json.MarshalIndent(errorString, "", "\t")
 	if err != nil {
-		log.Panic(err)
+		log.Print(err)
 		return
 	}
 
