@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="LastWeekendDB" uuid="0dc1cc52-2483-41b4-9548-d87e74e57a42">
+    <data-source source="LOCAL" name="LastWeekendDB" uuid="f131f429-6503-4b87-875a-da8aec611821">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
