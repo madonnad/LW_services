@@ -11,6 +11,7 @@ import (
 	m "last_weekend_services/src/models"
 
 	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 var upgrader = websocket.Upgrader{
@@ -27,12 +28,13 @@ type WebSocketPayload struct {
 	Operation string      `json:"operation"`
 	Type      string      `json:"type"`
 	Received  time.Time   `json:"received"`
+	UserID    string      `json:"user_id"`
 	Payload   interface{} `json:"payload"`
 }
 
 var uid = "69ac1008-60f8-4518-8039-e332c9265115"
 
-func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
+func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(500)
@@ -43,38 +45,36 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool
 	var newConnection ConnectionState = ConnectionState{Conn: conn, Active: true}
 
 	log.Print("Listening via WebSocket...")
-	go newConnection.QueryAndWrite(ctx, connPool, conn)
+	go newConnection.ListenAndWrite(ctx, connPool, conn, rdb)
 	go newConnection.CheckConnectionStatus(ctx, conn)
 
 }
 
-func (connectionState *ConnectionState) QueryAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn) {
-	queryTime := time.Now().UTC()
-	updatedTime := queryTime
+func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, rdb *redis.Client) {
+	//queryTime := time.Now().UTC()
+	//updatedTime := queryTime
 
 	for connectionState.Active == true {
-		log.Printf("Status: %v", connectionState.Active)
 
-		err := AlbumRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime)
-		if err != nil {
-			log.Printf("failed to check album notifications: %s", err)
-		}
-		err = FriendRequestCheck(ctx, connPool, conn, &queryTime, &updatedTime)
-		if err != nil {
-			log.Printf("failed to check friend requests: %s", err)
-		}
-		err = NotificationCheck(ctx, connPool, conn, &queryTime, &updatedTime)
-		if err != nil {
-			log.Printf("failed to check generic notifications: %s", err)
-		}
+		pubsub := rdb.Subscribe(ctx, "album-requests")
+		ch := pubsub.Channel()
 
-		time.Sleep(4 * time.Second)
-		queryTime = updatedTime
+		for message := range ch {
+			var wsPayload WebSocketPayload
+			json.Unmarshal([]byte(message.Payload), &wsPayload)
 
-		log.Print("Hello")
+			//log.Print(wsPayload.UserID)
+			if wsPayload.UserID == uid {
+				err := conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
+				if err != nil {
+					log.Print(err)
+					return
+				}
+			}
+		}
 
 	}
-	log.Print("The WebSocket is closing..")
+	log.Print("The websocket is closing..")
 	conn.Close()
 	return
 }
@@ -91,39 +91,6 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 			}
 		}
 	}
-}
-
-func AlbumRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
-	var wsPayload WebSocketPayload
-	var album Album
-	var receivedLocal time.Time
-	notificationQuery := `SELECT a.album_id, a.album_name, a.album_cover_id, a.album_owner, ar.invited_at
-						 FROM albums a
-						 JOIN album_requests ar ON a.album_id = ar.album_id
-						 WHERE ar.invited_id = $1 AND ar.invited_at > $2`
-
-	rows, err := connPool.Pool.Query(ctx, notificationQuery, uid, *queryTime)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		wsPayload.Type = "album_request"
-		wsPayload.Operation = "INSERT"
-
-		err := rows.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumCoverID, &album.AlbumOwner, &receivedLocal)
-		if err != nil {
-			return err
-		}
-
-		wsPayload.Payload = album
-		wsPayload.Received = receivedLocal.UTC()
-
-		if wsPayload.Received.After(*updatedTime) {
-			*updatedTime = wsPayload.Received
-		}
-		writeNotification(conn, wsPayload)
-	}
-	return nil
 }
 
 func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {

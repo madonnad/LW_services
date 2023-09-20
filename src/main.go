@@ -10,6 +10,7 @@ import (
 	m "last_weekend_services/src/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -38,10 +39,20 @@ func CreatePostgresPool(connString string, context context.Context) (*m.PGPool, 
 
 func main() {
 	ctx := context.Background()
+
+	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v", user, password, host, port, dbname)
 	connPool, _ := CreatePostgresPool(connString, ctx)
 	defer connPool.Pool.Close()
 
+	// Redis Initialization
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+
+	//Server Starting String
 	host := "0.0.0.0"
 	port := "2525"
 	serverString := fmt.Sprintf("%v:%v", host, port)
@@ -49,7 +60,7 @@ func main() {
 	//Route Register
 	http.HandleFunc("/", connPool.GETHandlerRoot)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		h.WebSocketHandler(w, r, connPool, ctx)
+		h.WebSocketHandler(w, r, connPool, rdb, ctx)
 	})
 	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -62,7 +73,7 @@ func main() {
 		case http.MethodGet:
 			h.GETAlbumsByUID(w, r, connPool)
 		case http.MethodPost:
-			h.POSTNewAlbum(w, r, connPool)
+			h.POSTNewAlbum(ctx, w, r, connPool, rdb)
 		}
 	})
 	http.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {

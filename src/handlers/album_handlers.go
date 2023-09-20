@@ -11,6 +11,7 @@ import (
 	m "last_weekend_services/src/models"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 type Album struct {
@@ -22,6 +23,7 @@ type Album struct {
 	LockedAt     time.Time `json:"locked_at"`
 	UnlockedAt   time.Time `json:"unlocked_at"`
 	RevealedAt   time.Time `json:"revealed_at"`
+	InvitedList  []string  `json:"invited_list"`
 }
 
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
@@ -78,7 +80,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) 
 
 }
 
-func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client) {
 	album := Album{}
 
 	bytes, err := io.ReadAll(r.Body)
@@ -107,6 +109,12 @@ func POSTNewAlbum(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 		return
 	}
 
+	err = SendAlbumRequests(ctx, album.AlbumID, album.InvitedList, rdb, connPool)
+	if err != nil {
+		log.Printf("Sending album requests failed with error: %v", err)
+		return
+	}
+
 	insertResponse, err := json.MarshalIndent(album, "", "\t")
 	if err != nil {
 		log.Print(err)
@@ -130,4 +138,34 @@ func writeErrorToWriter(w http.ResponseWriter, errorString string) {
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func SendAlbumRequests(ctx context.Context, albumID string, invited []string, rdb *redis.Client, connPool *m.PGPool) error {
+	query := `INSERT INTO album_requests (album_id, invited_id) VALUES ($1, $2) RETURNING invited_at`
+
+	for _, user := range invited {
+		var wsPayload WebSocketPayload
+		result := connPool.Pool.QueryRow(ctx, query, albumID, user)
+		err := result.Scan(&wsPayload.Received)
+		if err != nil {
+			log.Printf("Failed to add user to album request table: %v", err)
+			return err
+		}
+		wsPayload.Operation = "INSERT"
+		wsPayload.Type = "album_request"
+		wsPayload.UserID = user
+		wsPayload.Payload = albumID
+
+		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+		if err != nil {
+			log.Print(err)
+		}
+
+		err = rdb.Publish(ctx, "album-requests", jsonPayload).Err()
+		if err != nil {
+			log.Print(err)
+		}
+	}
+
+	return nil
 }
