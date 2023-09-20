@@ -31,13 +31,6 @@ func UserEndpointHandler(connPool *m.PGPool) http.HandlerFunc {
 	})
 }
 
-/*var UserEndpointHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		GETUserInformation(w, r, connPool)
-	}
-})*/
-
 func GETUserInformation(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 	var user User
 
