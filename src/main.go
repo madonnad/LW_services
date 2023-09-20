@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	h "last_weekend_services/src/handlers"
+	middleware "last_weekend_services/src/middleware"
 	m "last_weekend_services/src/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +41,8 @@ func CreatePostgresPool(connString string, context context.Context) (*m.PGPool, 
 func main() {
 	ctx := context.Background()
 
+	//Auth0 Initialization
+
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v", user, password, host, port, dbname)
 	connPool, _ := CreatePostgresPool(connString, ctx)
@@ -57,17 +60,17 @@ func main() {
 	port := "2525"
 	serverString := fmt.Sprintf("%v:%v", host, port)
 
+	jwtMiddleware := middleware.EnsureValidToken()
+
 	//Route Register
 	http.HandleFunc("/", connPool.GETHandlerRoot)
+	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+
+	})
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		h.WebSocketHandler(w, r, connPool, rdb, ctx)
 	})
-	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			h.GETUserInformation(w, r, connPool)
-		}
-	})
+	http.Handle("/users", jwtMiddleware(h.UserEndpointHandler(connPool)))
 	http.HandleFunc("/albums", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
