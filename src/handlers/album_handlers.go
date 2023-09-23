@@ -26,6 +26,17 @@ type Album struct {
 	InvitedList  []string  `json:"invited_list"`
 }
 
+func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			GETAlbumsByUID(w, r, connPool)
+		case http.MethodPost:
+			POSTNewAlbum(ctx, w, r, connPool, rdb)
+		}
+	})
+}
+
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
 	albums := []Album{}
 

@@ -10,8 +10,10 @@ import (
 
 	m "last_weekend_services/src/models"
 
+	//jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 )
 
 type Image struct {
@@ -22,9 +24,25 @@ type Image struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			GETImageFromID(w, r, connPool, ctx)
+		case http.MethodPost:
+			POSTNewImage(w, r, connPool, ctx)
+		}
+	})
+}
+
 func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
 	images := []Image{}
 	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
+
+	//ctxKey := jwtmiddleware.ContextKey{}
+
+	//r.Context().Value(ctxKey)
+
 	if err != nil {
 		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user's images")
 		log.Print(err)

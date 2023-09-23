@@ -10,6 +10,7 @@ import (
 	middleware "last_weekend_services/src/middleware"
 	m "last_weekend_services/src/models"
 
+	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -60,38 +61,16 @@ func main() {
 	port := "2525"
 	serverString := fmt.Sprintf("%v:%v", host, port)
 
+	r := mux.NewRouter()
+
 	jwtMiddleware := middleware.EnsureValidToken()
 
 	//Route Register
-	http.HandleFunc("/", connPool.GETHandlerRoot)
-	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-
-	})
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		h.WebSocketHandler(w, r, connPool, rdb, ctx)
-	})
-	http.Handle("/users", jwtMiddleware(h.UserEndpointHandler(connPool)))
-	http.HandleFunc("/albums", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			h.GETAlbumsByUID(w, r, connPool)
-		case http.MethodPost:
-			h.POSTNewAlbum(ctx, w, r, connPool, rdb)
-		}
-	})
-	http.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/images/ofuser" {
-			h.GETImagesFromUserID(w, r, connPool, ctx)
-			return
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			h.GETImageFromID(w, r, connPool, ctx)
-		case http.MethodPost:
-			h.POSTNewImage(w, r, connPool, ctx)
-		}
-	})
+	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                      // Unprotected
+	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                  // Protected
+	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool))).Methods("GET")                                // Protected
+	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")       //Protected
+	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST") // Protected
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
