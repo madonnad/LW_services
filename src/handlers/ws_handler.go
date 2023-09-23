@@ -34,7 +34,13 @@ type WebSocketPayload struct {
 
 var uid = "69ac1008-60f8-4518-8039-e332c9265115"
 
-func WebSocketHandler(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context) {
+func WebSocketEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		WebSocket(w, r, connPool, rdb, ctx)
+	})
+}
+
+func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(500)
