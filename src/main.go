@@ -74,7 +74,7 @@ func main() {
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
-	err := http.ListenAndServe(serverString, nil)
+	err := http.ListenAndServe(serverString, r)
 	if err != nil {
 		fmt.Printf("Error starting the server: %v\n", err)
 	}
