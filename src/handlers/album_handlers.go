@@ -10,7 +10,8 @@ import (
 
 	m "last_weekend_services/src/models"
 
-	"github.com/google/uuid"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -28,24 +29,33 @@ type Album struct {
 
 func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		if !ok {
+			log.Printf("Failed to get validated claims")
+			return
+		}
+
+		log.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
+
 		switch r.Method {
 		case http.MethodGet:
-			GETAlbumsByUID(w, r, connPool)
+			GETAlbumsByUID(w, r, connPool, claims.RegisteredClaims.Subject)
 		case http.MethodPost:
 			POSTNewAlbum(ctx, w, r, connPool, rdb)
 		}
 	})
 }
 
-func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
 	albums := []Album{}
 
-	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
-	if err != nil {
+	//uid, err := uuid.Parse(r.URL.Query().Get("uid"))
+
+	/*if err != nil {
 		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user")
 
 		return
-	}
+	}*/
 
 	query := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
 				 FROM albums a
