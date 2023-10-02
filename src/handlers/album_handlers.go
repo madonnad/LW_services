@@ -16,15 +16,16 @@ import (
 )
 
 type Album struct {
-	AlbumID      string    `json:"album_id"`
-	AlbumName    string    `json:"album_name"`
-	AlbumOwner   string    `json:"album_owner"`
-	AlbumCoverID string    `json:"album_cover_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	LockedAt     time.Time `json:"locked_at"`
-	UnlockedAt   time.Time `json:"unlocked_at"`
-	RevealedAt   time.Time `json:"revealed_at"`
-	InvitedList  []string  `json:"invited_list"`
+	AlbumID      string        `json:"album_id"`
+	AlbumName    string        `json:"album_name"`
+	AlbumOwner   string        `json:"album_owner"`
+	AlbumCoverID string        `json:"album_cover_id"`
+	CreatedAt    time.Time     `json:"created_at"`
+	LockedAt     time.Time     `json:"locked_at"`
+	UnlockedAt   time.Time     `json:"unlocked_at"`
+	RevealedAt   time.Time     `json:"revealed_at"`
+	InvitedList  []string      `json:"invited_list"`
+	Images       []interface{} `json:"images"`
 }
 
 func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
@@ -39,42 +40,61 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 
 		switch r.Method {
 		case http.MethodGet:
-			GETAlbumsByUID(w, r, connPool, claims.RegisteredClaims.Subject)
+			GETAlbumsByUID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
 		case http.MethodPost:
 			POSTNewAlbum(ctx, w, r, connPool, rdb)
 		}
 	})
 }
 
-func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
 	albums := []Album{}
 
-	//uid, err := uuid.Parse(r.URL.Query().Get("uid"))
+	albumQuery := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
+				   FROM albums a
+				   JOIN albumuser au
+				   ON au.album_id=a.album_id
+				   WHERE au.user_id=$1`
+	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
+				   FROM images i
+				   JOIN imagealbum ia
+				   ON i.image_id=ia.image_id
+				   WHERE ia.album_id=$1`
 
-	/*if err != nil {
-		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user")
-
-		return
-	}*/
-
-	query := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
-				 FROM albums a
-				 JOIN albumuser au
-				 ON au.album_id=a.album_id
-				 WHERE au.user_id=$1`
-	response, err := connPool.Pool.Query(context.Background(), query, uid)
+	response, err := connPool.Pool.Query(ctx, albumQuery, uid)
 	if err != nil {
 		log.Print(err)
 	}
 
 	for response.Next() {
 		var album Album
+		images := []Image{}
+
+		//Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID)
-
 		if err != nil {
 			log.Print(err)
 		}
+
+		//Fetch Albums Images
+		imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		for imageResponse.Next() {
+			var image Image
+
+			err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
+			if err != nil {
+				log.Print(err)
+			}
+
+			images = append(images, image)
+			album.Images = append(album.Images, images)
+		}
+
 		albums = append(albums, album)
 	}
 
