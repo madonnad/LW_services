@@ -10,6 +10,7 @@ import (
 	middleware "last_weekend_services/src/middleware"
 	m "last_weekend_services/src/models"
 
+	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -56,6 +57,12 @@ func main() {
 		DB:       0,
 	})
 
+	// GCP Storage Initialization
+	gcpStorage, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Panic(err)
+	}
+
 	//Server Starting String
 	host := "0.0.0.0"
 	port := "2525"
@@ -69,12 +76,13 @@ func main() {
 	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                      // Unprotected
 	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                  // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool))).Methods("GET")                                // Protected
-	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")       //Protected
+	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST") // Protected
+	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                    // Protected
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
-	err := http.ListenAndServe(serverString, r)
+	err = http.ListenAndServe(serverString, r)
 	if err != nil {
 		fmt.Printf("Error starting the server: %v\n", err)
 	}
