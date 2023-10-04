@@ -36,7 +36,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			return
 		}
 
-		//log.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
+		//clog.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
 
 		switch r.Method {
 		case http.MethodGet:
