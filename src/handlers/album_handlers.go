@@ -36,13 +36,13 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			return
 		}
 
-		log.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
+		//clog.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
 
 		switch r.Method {
 		case http.MethodGet:
 			GETAlbumsByUID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
 		case http.MethodPost:
-			POSTNewAlbum(ctx, w, r, connPool, rdb)
+			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
 }
@@ -121,32 +121,56 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 }
 
-func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client) {
+func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
 	album := Album{}
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		writeErrorToWriter(w, "Error: Could not read the request body")
-		log.Print(err)
+		log.Printf("Failed Reading Body: %v", err)
 		return
 	}
 
 	err = json.Unmarshal(bytes, &album)
 	if err != nil {
 		writeErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
-		log.Print(err)
+		log.Printf("Failed Unmarshaling: %v", err)
 		return
 	}
 
-	query := `INSERT INTO albums
+	newImageQuery := `INSERT INTO images
+					  (image_owner, caption)
+					  VALUES ($1, $2) RETURNING image_id`
+
+	err = connPool.Pool.QueryRow(ctx, newImageQuery, uid, album.AlbumName).Scan(&album.AlbumCoverID)
+	if err != nil {
+		writeErrorToWriter(w, "Unable to create entry in image table for album cover")
+		log.Printf("Unable to create entry in image table for album cover: %v", err)
+		return
+	}
+
+	createAlbumQuery := `INSERT INTO albums
 				  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
 				  VALUES ($1, $2, $3, $4, $5, $6) RETURNING album_id, created_at`
-	err = connPool.Pool.QueryRow(context.Background(), query,
-		album.AlbumName, album.AlbumOwner, album.AlbumCoverID, album.LockedAt,
+
+	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
+		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
 		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt)
 	if err != nil {
-		log.Print(err)
+		writeErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
+		log.Printf("Unable to create entry in albums table for new album: %v", err)
+		return
+	}
+
+	updateAlbumUserQuery := `INSERT INTO albumuser
+						(album_id, user_id)
+						VALUES ($1, $2)`
+
+	_, err = connPool.Pool.Exec(ctx, updateAlbumUserQuery, album.AlbumID, uid)
+	if err != nil {
+		writeErrorToWriter(w, "Unable to associate album owner to the new album")
+		log.Printf("Unable to associate album owner to the new album: %v", err)
 		return
 	}
 
