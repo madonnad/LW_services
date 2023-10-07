@@ -44,7 +44,7 @@ func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGP
 	//r.Context().Value(ctxKey)
 
 	if err != nil {
-		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user's images")
+		WriteErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user's images")
 		log.Print(err)
 		return
 	}
@@ -95,7 +95,7 @@ func GETImageFromID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
 	if err != nil {
-		writeErrorToWriter(w, "Error: Provide a unique, valid UUID to return a image")
+		WriteErrorToWriter(w, "Error: Provide a unique, valid UUID to return a image")
 		log.Print(err)
 		return
 	}
@@ -107,7 +107,7 @@ func GETImageFromID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 	err = results.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeErrorToWriter(w, "Error: Image does not exist")
+			WriteErrorToWriter(w, "Error: Image does not exist")
 			log.Print("Error: Image does not exist")
 			return
 		} else {
@@ -133,14 +133,14 @@ func POSTNewImage(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ct
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		writeErrorToWriter(w, "Error: Could not read the request body")
+		WriteErrorToWriter(w, "Error: Could not read the request body")
 		log.Print(err)
 		return
 	}
 
 	err = json.Unmarshal(bytes, &image)
 	if err != nil {
-		writeErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
+		WriteErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
 		log.Print(err)
 		return
 	}
@@ -159,4 +159,32 @@ func POSTNewImage(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ct
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *Album) {
+	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
+				   FROM images i
+				   JOIN imagealbum ia
+				   ON i.image_id=ia.image_id
+				   WHERE ia.album_id=$1`
+
+	images := []Image{}
+
+	//Fetch Albums Images
+	imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID)
+	if err != nil {
+		log.Print(err)
+	}
+
+	for imageResponse.Next() {
+		var image Image
+
+		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
+		if err != nil {
+			log.Print(err)
+		}
+
+		images = append(images, image)
+	}
+	album.Images = images
 }

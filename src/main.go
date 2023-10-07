@@ -73,8 +73,9 @@ func main() {
 	jwtMiddleware := middleware.EnsureValidToken()
 
 	//Route Register
-	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                      // Unprotected
-	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                  // Protected
+	r.HandleFunc("/", connPool.GETHandlerRoot) // Unprotected
+	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))
+	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                           // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool))).Methods("GET")                                // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST") // Protected
