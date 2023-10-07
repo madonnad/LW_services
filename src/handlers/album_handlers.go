@@ -16,16 +16,17 @@ import (
 )
 
 type Album struct {
-	AlbumID      string        `json:"album_id"`
-	AlbumName    string        `json:"album_name"`
-	AlbumOwner   string        `json:"album_owner"`
-	AlbumCoverID string        `json:"album_cover_id"`
-	CreatedAt    time.Time     `json:"created_at"`
-	LockedAt     time.Time     `json:"locked_at"`
-	UnlockedAt   time.Time     `json:"unlocked_at"`
-	RevealedAt   time.Time     `json:"revealed_at"`
-	InvitedList  []string      `json:"invited_list"`
-	Images       []interface{} `json:"images"`
+	AlbumID      string    `json:"album_id"`
+	AlbumName    string    `json:"album_name"`
+	AlbumOwner   string    `json:"album_owner"`
+	AlbumCoverID string    `json:"album_cover_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	LockedAt     time.Time `json:"locked_at"`
+	UnlockedAt   time.Time `json:"unlocked_at"`
+	RevealedAt   time.Time `json:"revealed_at"`
+	Visibility   string    `json:"visibility"`
+	InvitedList  []string  `json:"invited_list"`
+	Images       []Image   `json:"images"`
 }
 
 func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
@@ -35,8 +36,6 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			log.Printf("Failed to get validated claims")
 			return
 		}
-
-		//clog.Printf("The User ID is: %v", claims.RegisteredClaims.Subject)
 
 		switch r.Method {
 		case http.MethodGet:
@@ -72,7 +71,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 		//Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
-			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID)
+			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			log.Print(err)
 		}
@@ -92,7 +91,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 			}
 
 			images = append(images, image)
-			album.Images = append(album.Images, images)
+			album.Images = images
 		}
 
 		albums = append(albums, album)
@@ -127,14 +126,14 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		writeErrorToWriter(w, "Error: Could not read the request body")
+		WriteErrorToWriter(w, "Error: Could not read the request body")
 		log.Printf("Failed Reading Body: %v", err)
 		return
 	}
 
 	err = json.Unmarshal(bytes, &album)
 	if err != nil {
-		writeErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
+		WriteErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
 		log.Printf("Failed Unmarshaling: %v", err)
 		return
 	}
@@ -145,7 +144,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	err = connPool.Pool.QueryRow(ctx, newImageQuery, uid, album.AlbumName).Scan(&album.AlbumCoverID)
 	if err != nil {
-		writeErrorToWriter(w, "Unable to create entry in image table for album cover")
+		WriteErrorToWriter(w, "Unable to create entry in image table for album cover")
 		log.Printf("Unable to create entry in image table for album cover: %v", err)
 		return
 	}
@@ -158,7 +157,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
 		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt)
 	if err != nil {
-		writeErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
+		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
 		return
 	}
@@ -169,7 +168,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	_, err = connPool.Pool.Exec(ctx, updateAlbumUserQuery, album.AlbumID, uid)
 	if err != nil {
-		writeErrorToWriter(w, "Unable to associate album owner to the new album")
+		WriteErrorToWriter(w, "Unable to associate album owner to the new album")
 		log.Printf("Unable to associate album owner to the new album: %v", err)
 		return
 	}
@@ -192,7 +191,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 }
 
-func writeErrorToWriter(w http.ResponseWriter, errorString string) {
+func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 	jsonString, err := json.MarshalIndent(errorString, "", "\t")
 	if err != nil {
 		log.Print(err)
