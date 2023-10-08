@@ -49,7 +49,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
 	albums := []Album{}
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id
+	albumQuery := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
 				   FROM albums a
 				   JOIN albumuser au
 				   ON au.album_id=a.album_id
