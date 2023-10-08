@@ -134,7 +134,7 @@ func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket
 	return nil
 }
 
-func NotificationCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
+/*func NotificationCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
 	var wsPayload WebSocketPayload
 	var user User
 	var genericNotification m.GenericNotification
@@ -169,7 +169,7 @@ func NotificationCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.
 		}
 	}
 	return nil
-}
+}*/
 
 func writeNotification(conn *websocket.Conn, n WebSocketPayload) error {
 	responseBytes, err := json.MarshalIndent(n, "", "\t")
