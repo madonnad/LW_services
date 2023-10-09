@@ -9,11 +9,15 @@ type Notification struct {
 }
 
 type GenericNotification struct {
-	NotificationId   string `json:"notification_id"`
-	MediaID          string `json:"media_id"`
-	AlbumID          string `json:"album_id"`
-	NotificationSeen bool   `json:"notification_seen"`
-	GenericType      string `json:"generic_type"`
+	NotificationID   string    `json:"notification_id"`
+	MediaID          string    `json:"media_id"`
+	AlbumID          string    `json:"album_id"`
+	AlbumName        string    `json:"album_name"`
+	NotifierID       string    `json:"notifier_id"`
+	NotifierName     string    `json:"notifier_name"`
+	NotificationSeen bool      `json:"notification_seen"`
+	NotificationType string    `json:"notification_type"`
+	ReceivedAt       time.Time `json:"received_at"`
 }
 
 type AlbumRequestNotification struct {
