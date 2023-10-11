@@ -3,51 +3,44 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"time"
 
 	m "last_weekend_services/src/models"
 
 	//jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 )
 
-type Image struct {
-	ID         string    `json:"image_id"`
-	ImageOwner string    `json:"image_owner"`
-	Caption    string    `json:"caption"`
-	Upvotes    uint      `json:"upvotes"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
 func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		if !ok {
+			fmt.Fprintf(w, "Failed to get validated claims")
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
-			GETImageFromID(w, r, connPool, ctx)
+			switch r.URL.Path {
+			case "/user/image":
+				GETImagesFromUserID(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			case "/user/album/image":
+				GETImageFromID(ctx, w, r, connPool)
+			}
 		case http.MethodPost:
-			POSTNewImage(w, r, connPool, ctx)
+			POSTNewImage(ctx, w, r, connPool)
 		}
 	})
 }
 
-func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
-	images := []Image{}
-	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
-
-	//ctxKey := jwtmiddleware.ContextKey{}
-
-	//r.Context().Value(ctxKey)
-
-	if err != nil {
-		WriteErrorToWriter(w, "Error: Provide a unique, valid UUID to return a user's images")
-		log.Print(err)
-		return
-	}
+func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	images := []m.Image{}
 
 	query := `SELECT image_id, image_owner, caption, upvotes, created_at
 			  FROM images
@@ -58,7 +51,7 @@ func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGP
 	}
 
 	for result.Next() {
-		var image Image
+		var image m.Image
 		err := result.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
@@ -77,7 +70,7 @@ func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGP
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(responseBytes)
 	} else {
-		errorString, err := json.MarshalIndent("Error: No Albums Found", "", "\t")
+		errorString, err := json.MarshalIndent("Error: No Images Found", "", "\t")
 		if err != nil {
 			log.Panic(err)
 			return
@@ -90,8 +83,8 @@ func GETImagesFromUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGP
 
 }
 
-func GETImageFromID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
-	image := Image{}
+func GETImageFromID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	image := m.Image{}
 
 	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
 	if err != nil {
@@ -127,8 +120,8 @@ func GETImageFromID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 }
 
-func POSTNewImage(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
-	image := Image{}
+func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	image := m.Image{}
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -168,7 +161,7 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *Album) {
 				   ON i.image_id=ia.image_id
 				   WHERE ia.album_id=$1`
 
-	images := []Image{}
+	images := []m.Image{}
 
 	//Fetch Albums Images
 	imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID)
@@ -177,7 +170,7 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *Album) {
 	}
 
 	for imageResponse.Next() {
-		var image Image
+		var image m.Image
 
 		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
 		if err != nil {

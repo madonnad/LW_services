@@ -26,7 +26,7 @@ type Album struct {
 	RevealedAt   time.Time `json:"revealed_at"`
 	Visibility   string    `json:"visibility"`
 	InvitedList  []string  `json:"invited_list"`
-	Images       []Image   `json:"images"`
+	Images       []m.Image `json:"images"`
 }
 
 func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
@@ -67,7 +67,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 	for response.Next() {
 		var album Album
-		images := []Image{}
+		images := []m.Image{}
 
 		//Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
@@ -83,7 +83,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 		}
 
 		for imageResponse.Next() {
-			var image Image
+			var image m.Image
 
 			err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
 			if err != nil {
