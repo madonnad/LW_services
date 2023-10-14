@@ -101,7 +101,7 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 
 func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
 	var wsPayload WebSocketPayload
-	var user User
+	var user m.User
 	var receivedLocal time.Time
 
 	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
