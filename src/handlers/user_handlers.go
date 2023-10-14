@@ -6,21 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	m "last_weekend_services/src/models"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
-
-type User struct {
-	ID        string    `json:"user_id"`
-	FirstName string    `json:"first_name"`
-	LastName  string    `json:"last_name"`
-	CreatedAt time.Time `json:"created_at"`
-	Avatar    string    `json:"avatar"`
-}
 
 func UserEndpointHandler(connPool *m.PGPool) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +23,7 @@ func UserEndpointHandler(connPool *m.PGPool) http.HandlerFunc {
 }
 
 func GETUserInformation(w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
-	var user User
+	var user m.User
 
 	uid, err := uuid.Parse(r.URL.Query().Get("uid"))
 	if err != nil {
@@ -48,7 +39,7 @@ func GETUserInformation(w http.ResponseWriter, r *http.Request, connPool *m.PGPo
 	response := connPool.Pool.QueryRow(context.Background(), sql_query, uid)
 
 	//fmt.Printf("%v", response.Scan())
-	err = response.Scan(&user.ID, &user.CreatedAt, &user.FirstName, &user.LastName, &user.Avatar)
+	err = response.Scan(&user.ID, &user.CreatedAt, &user.FirstName, &user.LastName)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			var errorString string = fmt.Sprintln("Error: User does not exist")
