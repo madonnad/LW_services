@@ -25,11 +25,31 @@ func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *
 		switch r.Method {
 		case http.MethodGet:
 			GETExistingNotifications(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+		case http.MethodDelete:
+			switch r.URL.Path {
+			case "/notifications/album":
+				albumID := r.URL.Query().Get("album_id")
+				DeleteAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
+			case "/notifications/friend":
+				friendID := r.URL.Query().Get("friend_id")
+				DeleteFriendRequest(ctx, w, connPool, friendID, claims.RegisteredClaims.Subject)
+			}
+		case http.MethodPost:
+			switch r.URL.Path {
+			case "/notifications/album":
+				albumID := r.URL.Query().Get("album_id")
+				AcceptAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
+			case "/notifications/friend":
+				friendID := r.URL.Query().Get("friend_id")
+				AcceptFriendRequest(ctx, w, connPool, friendID, claims.RegisteredClaims.Subject)
+			}
 		}
 
 	})
 }
 
+// ------------------------------------------------------------------------------------------------------------------------------
+// Look up notifications
 func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
 	var notifications m.Notification
 
@@ -125,7 +145,7 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 					FROM notifications
 					WHERE notification_type = $2
 					GROUP BY album_id)
-					
+
 					SELECT u.first_name, a.album_name, n.album_id, a.album_cover_id, n.notification_type, n.received_at, at.total
 					FROM (
 						SELECT sender_id, album_id, notification_seen, receiver_id, notification_type, received_at,
@@ -137,7 +157,7 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 					ON a.album_id = n.album_id
 					JOIN AlbumTotals at
 					ON n.album_id = at.album_id
-					WHERE recent <= 2 
+					WHERE recent <= 2
 					AND receiver_id = $1
 					AND notification_type = $2
 					AND received_at > $3`
@@ -157,7 +177,7 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 			return nil, err
 		}
 
-		existingSummary := findSummaryByIDType(summaryNotifications, summary.AlbumID, summary.NotificationType)
+		existingSummary := lookupSummaryByAlbumAndType(summaryNotifications, summary.AlbumID, summary.NotificationType)
 		if existingSummary != nil {
 			existingSummary.NameTwo = summary.NameOne
 			continue
@@ -168,11 +188,83 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 	return summaryNotifications, nil
 }
 
-func findSummaryByIDType(slice []m.SummaryNotification, id string, notificationType string) *m.SummaryNotification {
+// The following function will check to see if a summary for an Album and Noti type combination is already created to append to it
+func lookupSummaryByAlbumAndType(slice []m.SummaryNotification, id string, notificationType string) *m.SummaryNotification {
 	for _, item := range slice {
 		if item.AlbumID == id && item.NotificationType == notificationType {
 			return &item
 		}
 	}
+	return nil
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------
+// Update/Delete Notifications from Tables
+
+func AcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
+	query := `
+			INSERT INTO albumuser (album_id, user_id)
+			VALUES ($1, $2)
+	`
+	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to insert album to albumuser list: %v", err)
+		return err
+	}
+
+	err = DeleteAlbumRequest(ctx, w, connPool, albumID, uid)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func AcceptFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
+	query := `
+			INSERT INTO friends (user1_id, user2_id)
+			VALUES ($1, $2)
+	`
+	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to insert friend to friends list: %v", err)
+		return err
+	}
+
+	err = DeleteFriendRequest(ctx, w, connPool, friendID, uid)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
+	query := `
+			DELETE FROM album_requests
+			WHERE album_id = $1 AND invited_id = $2`
+
+	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to remove album request: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func DeleteFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
+	query := `
+			DELETE FROM friend_requests
+			WHERE sender_id = $1 AND receiver_id = $2`
+
+	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to remove friend request: %v", err)
+		return err
+	}
+
 	return nil
 }
