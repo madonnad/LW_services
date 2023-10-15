@@ -24,6 +24,9 @@ func FriendEndpointHanlder(ctx context.Context, connPool *m.PGPool, rdb *redis.C
 		switch r.Method {
 		case http.MethodGet:
 			GETFriendsByUserID(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+		case http.MethodDelete:
+			friendID := r.URL.Query().Get("friend_id")
+			RemoveUserFromFriendList(ctx, w, connPool, claims.RegisteredClaims.Subject, friendID)
 		}
 	})
 }
@@ -65,4 +68,21 @@ func GETFriendsByUserID(ctx context.Context, w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBytes)
+}
+
+func RemoveUserFromFriendList(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string, friendID string) error {
+	query := `
+			DELETE FROM friends
+		    WHERE
+		        (user1_id = $1 AND user2_id = $2)
+		            OR
+		        (user2_id = $1 AND user1_id = $2);`
+	_, err := connPool.Pool.Exec(ctx, query, uid, friendID)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to remove friend: %v", err)
+		return err
+	}
+
+	return nil
+
 }
