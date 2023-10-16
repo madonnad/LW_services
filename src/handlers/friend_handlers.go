@@ -35,16 +35,16 @@ func GETFriendsByUserID(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	var friends []m.Friend
 
 	query := `
-	SELECT u.user_id, u.first_name, u.last_name, f.friends_since
-	FROM users u
-	JOIN (
-		SELECT friends_since,
-			CASE
-				WHEN user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user2_id
-				WHEN user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user1_id
-			END AS friend_id
-		FROM friends ) as f
-	ON f.friend_id = u.user_id `
+			SELECT u.user_id, u.first_name, u.last_name, f.friends_since
+			FROM users u
+			JOIN (
+				SELECT friends_since,
+					CASE
+						WHEN user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user2_id
+						WHEN user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user1_id
+					END AS friend_id
+				FROM friends ) as f
+			ON f.friend_id = u.user_id`
 
 	response, err := connPool.Pool.Query(ctx, query, uid)
 	if err != nil {
