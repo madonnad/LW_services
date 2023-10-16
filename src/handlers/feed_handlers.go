@@ -36,24 +36,24 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 
 	query :=
 		`SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
-		FROM albums a
-		JOIN albumuser au
-		ON a.album_id = au.album_id
-		JOIN (
-			SELECT
-				CASE
-					WHEN user1_id = $1 THEN user2_id
-					WHEN user2_id = $1 THEN user1_id
-				END AS friend_id
-			FROM friends) fl
-		ON au.user_id = fl.friend_id
-		WHERE a.visibility = 'public' OR a.visibility = 'friends'
-		UNION DISTINCT
-		SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
-		FROM albums a
-		JOIN albumuser au
-		ON a.album_id = au.album_id
-		WHERE au.user_id = $1`
+			FROM albums a
+			JOIN albumuser au
+			ON a.album_id = au.album_id
+			JOIN (
+				SELECT
+					CASE
+						WHEN user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user2_id
+						WHEN user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user1_id
+					END AS friend_id
+				FROM friends) fl
+			ON au.user_id = fl.friend_id
+			WHERE a.visibility = 'public' OR a.visibility = 'friends'
+			UNION DISTINCT
+			SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
+			FROM albums a
+			JOIN albumuser au
+			ON a.album_id = au.album_id
+			WHERE au.user_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
 	response, err := connPool.Pool.Query(ctx, query, uid)
 	if err != nil {

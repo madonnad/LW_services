@@ -86,8 +86,7 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 						SELECT ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name, u.last_name, ar.invited_at
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
-						JOIN users u ON u.user_id = a.album_owner
-						WHERE ar.invited_id = $1`
+						JOIN users u ON (SELECT user_id FROM users WHERE auth_zero_id=$1)= a.album_owner;`
 
 	rows, err := connPool.Pool.Query(ctx, albumRequestQuery, uid)
 	if err != nil {
@@ -115,7 +114,7 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 						SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
 						FROM users u
 						JOIN friend_requests fr ON fr.sender_id = u.user_id
-						WHERE fr.receiver_id = $1`
+						WHERE fr.receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1);`
 
 	rows, err := connPool.Pool.Query(ctx, friendRequestQuery, uid)
 	if err != nil {
@@ -158,7 +157,7 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 					JOIN AlbumTotals at
 					ON n.album_id = at.album_id
 					WHERE recent <= 2
-					AND receiver_id = $1
+					AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
 					AND notification_type = $2
 					AND received_at > $3`
 
@@ -204,7 +203,7 @@ func lookupSummaryByAlbumAndType(slice []m.SummaryNotification, id string, notif
 func AcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
 	query := `
 			INSERT INTO albumuser (album_id, user_id)
-			VALUES ($1, $2)
+			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
 	`
 	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
 	if err != nil {
@@ -224,7 +223,7 @@ func AcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.
 func AcceptFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
 	query := `
 			INSERT INTO friends (user1_id, user2_id)
-			VALUES ($1, $2)
+			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
 	`
 	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
 	if err != nil {
@@ -244,7 +243,7 @@ func AcceptFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m
 func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
 	query := `
 			DELETE FROM album_requests
-			WHERE album_id = $1 AND invited_id = $2`
+			WHERE album_id = $1 AND invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
 
 	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
 	if err != nil {
@@ -258,7 +257,7 @@ func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.
 func DeleteFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
 	query := `
 			DELETE FROM friend_requests
-			WHERE sender_id = $1 AND receiver_id = $2`
+			WHERE sender_id = $1 AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
 
 	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
 	if err != nil {

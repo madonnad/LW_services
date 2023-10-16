@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func FriendEndpointHanlder(ctx context.Context, connPool *m.PGPool, rdb *redis.Client) http.Handler {
+func FriendEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Client) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -35,16 +35,16 @@ func GETFriendsByUserID(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	var friends []m.Friend
 
 	query := `
-			SELECT u.user_id, u.first_name, u.last_name, f.friends_since
-			FROM users u
-			JOIN (
-    			SELECT friends_since,
-        			CASE
-			            WHEN user1_id = $1 THEN user2_id
-			            WHEN user2_id = $1 THEN user1_id
-					END AS friend_id
-				FROM friends ) as f
-			ON f.friend_id = u.user_id `
+	SELECT u.user_id, u.first_name, u.last_name, f.friends_since
+	FROM users u
+	JOIN (
+		SELECT friends_since,
+			CASE
+				WHEN user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user2_id
+				WHEN user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) THEN user1_id
+			END AS friend_id
+		FROM friends ) as f
+	ON f.friend_id = u.user_id `
 
 	response, err := connPool.Pool.Query(ctx, query, uid)
 	if err != nil {
@@ -72,11 +72,11 @@ func GETFriendsByUserID(ctx context.Context, w http.ResponseWriter, r *http.Requ
 
 func RemoveUserFromFriendList(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string, friendID string) error {
 	query := `
-			DELETE FROM friends
-		    WHERE
-		        (user1_id = $1 AND user2_id = $2)
-		            OR
-		        (user2_id = $1 AND user1_id = $2);`
+		DELETE FROM friends
+		WHERE
+		    (user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) AND user2_id = $2)
+		        OR
+		    (user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) AND user1_id = $2)`
 	_, err := connPool.Pool.Exec(ctx, query, uid, friendID)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove friend: %v", err)

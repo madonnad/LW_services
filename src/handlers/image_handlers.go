@@ -42,9 +42,10 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
 	images := []m.Image{}
 
-	query := `SELECT image_id, image_owner, caption, upvotes, created_at
-			  FROM images
-			  WHERE image_owner = $1`
+	query := `
+			SELECT image_id, image_owner, caption, upvotes, created_at
+			FROM images
+			WHERE image_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1);`
 	result, err := connPool.Pool.Query(ctx, query, uid)
 	if err != nil {
 		log.Print(err)
@@ -61,25 +62,14 @@ func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Req
 	}
 
 	var responseBytes []byte
-	if len(images) != 0 {
-		responseBytes, err = json.MarshalIndent(images, "", "\t")
-		if err != nil {
-			log.Panic(err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(responseBytes)
-	} else {
-		errorString, err := json.MarshalIndent("Error: No Images Found", "", "\t")
-		if err != nil {
-			log.Panic(err)
-			return
-		}
-		responseBytes := []byte(errorString)
 
-		w.Header().Set("Content-Type", "application/json") //add content length number of bytes
-		w.Write(responseBytes)
+	responseBytes, err = json.MarshalIndent(images, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
 
 }
 

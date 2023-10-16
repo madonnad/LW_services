@@ -53,7 +53,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 				   FROM albums a
 				   JOIN albumuser au
 				   ON au.album_id=a.album_id
-				   WHERE au.user_id=$1`
+				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
 	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
 				   FROM images i
 				   JOIN imagealbum ia
@@ -98,26 +98,14 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 	}
 
 	var responseBytes []byte
-	if len(albums) != 0 {
-		responseBytes, err = json.MarshalIndent(albums, "", "\t")
-		if err != nil {
-			log.Panic(err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(responseBytes)
-	} else {
-		errorString, err := json.MarshalIndent("Error: No Albums Found", "", "\t")
-		if err != nil {
-			log.Panic(err)
-			return
-		}
-		responseBytes := []byte(errorString)
 
-		w.Header().Set("Content-Type", "application/json") //add content length number of bytes
-		w.Write(responseBytes)
+	responseBytes, err = json.MarshalIndent(albums, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
 	}
-
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
 }
 
 func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
@@ -150,8 +138,8 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	}
 
 	createAlbumQuery := `INSERT INTO albums
-				  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
-				  VALUES ($1, $2, $3, $4, $5, $6) RETURNING album_id, created_at`
+						  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
+						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6) RETURNING album_id, created_at`
 
 	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
 		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
@@ -164,7 +152,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	updateAlbumUserQuery := `INSERT INTO albumuser
 						(album_id, user_id)
-						VALUES ($1, $2)`
+						VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
 
 	_, err = connPool.Pool.Exec(ctx, updateAlbumUserQuery, album.AlbumID, uid)
 	if err != nil {
