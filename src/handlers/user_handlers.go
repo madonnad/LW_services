@@ -35,7 +35,7 @@ func GETUserInformation(w http.ResponseWriter, r *http.Request, connPool *m.PGPo
 		return
 	}
 
-	sql_query := "SELECT * FROM users WHERE user_id=$1"
+	sql_query := "SELECT * FROM users WHERE user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)"
 	response := connPool.Pool.QueryRow(context.Background(), sql_query, uid)
 
 	//fmt.Printf("%v", response.Scan())
