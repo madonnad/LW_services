@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	h "last_weekend_services/src/handlers"
+	i "last_weekend_services/src/inits"
 	middleware "last_weekend_services/src/middleware"
-	m "last_weekend_services/src/models"
 
 	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx/v5/pgxpool"
+	opensearch "github.com/opensearch-project/opensearch-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -24,30 +26,12 @@ const (
 	dbname   = "lw_db"
 )
 
-func CreatePostgresPool(connString string, context context.Context) (*m.PGPool, error) {
-	cfg, err := pgxpool.ParseConfig(connString)
-	if err != nil {
-		log.Print(err)
-		return nil, err
-	}
-
-	pool, err := pgxpool.NewWithConfig(context, cfg)
-	if err != nil {
-		log.Print(err)
-		return nil, err
-	}
-
-	return &m.PGPool{Pool: pool}, nil
-}
-
 func main() {
 	ctx := context.Background()
 
-	//Auth0 Initialization
-
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v", user, password, host, port, dbname)
-	connPool, _ := CreatePostgresPool(connString, ctx)
+	connPool, _ := i.CreatePostgresPool(connString, ctx)
 	defer connPool.Pool.Close()
 
 	// Redis Initialization
@@ -62,6 +46,25 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
+
+	// Opensearch Initialization
+	openSearchClient, err := opensearch.NewClient(opensearch.Config{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		Addresses: []string{"https://localhost:9200"},
+		Username:  "admin", // For testing only. Don't store credentials in code.
+		Password:  "admin"})
+	if err != nil {
+		fmt.Println("cannot initialize", err)
+		os.Exit(1)
+	}
+	log.Printf("OpenSearch Client Connected: %v", openSearchClient.Info)
+
+	// ---------------------------------------------------------------------------------------
+	//Only need the InitOpenSearch to run if we need to repopulate OpenSearch with the DB data
+	//i.InitOpenSearch(ctx, connPool, openSearchClient)
+	// ---------------------------------------------------------------------------------------
 
 	//Server Starting String
 	host := "0.0.0.0"
