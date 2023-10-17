@@ -59,7 +59,7 @@ func main() {
 		fmt.Println("cannot initialize", err)
 		os.Exit(1)
 	}
-	log.Printf("OpenSearch Client Connected: %v", openSearchClient.Info)
+	//log.Printf("OpenSearch Client Connected: %v", openSearchClient.Info)
 
 	// ---------------------------------------------------------------------------------------
 	//Only need the InitOpenSearch to run if we need to repopulate OpenSearch with the DB data

@@ -78,7 +78,7 @@ func AlbumFriendTextSearch(ctx context.Context, w http.ResponseWriter, connPool 
 		fmt.Fprintf(w, "Unable to parse JSON: %v", err)
 	}
 
-	log.Printf("Result: %v", openSearchResults.Hits.Hits)
+	//log.Printf("Result: %v", openSearchResults.Hits.Hits)
 
 	for _, value := range openSearchResults.Hits.Hits {
 		var result m.Search
