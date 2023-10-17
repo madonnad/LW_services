@@ -66,7 +66,7 @@ func AlbumFriendTextSearch(ctx context.Context, w http.ResponseWriter, connPool 
 	for response.Next() {
 		var result m.Search
 
-		err := response.Scan(&result.ID, &result.Lookup, &result.Asset, &result.FirstName, &result.LastName, &result.ResultType, &result.Rank)
+		err := response.Scan(&result.ID, &result.Name, &result.Asset, &result.FirstName, &result.LastName, &result.ResultType, &result.Rank)
 		if err != nil {
 			fmt.Fprintf(w, "Error parsing search into object with error: %v", err)
 			return
