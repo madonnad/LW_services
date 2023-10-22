@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
 
 	m "last_weekend_services/src/models"
 
@@ -14,20 +13,6 @@ import (
 	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/redis/go-redis/v9"
 )
-
-type Album struct {
-	AlbumID      string    `json:"album_id"`
-	AlbumName    string    `json:"album_name"`
-	AlbumOwner   string    `json:"album_owner"`
-	AlbumCoverID string    `json:"album_cover_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	LockedAt     time.Time `json:"locked_at"`
-	UnlockedAt   time.Time `json:"unlocked_at"`
-	RevealedAt   time.Time `json:"revealed_at"`
-	Visibility   string    `json:"visibility"`
-	InvitedList  []string  `json:"invited_list"`
-	Images       []m.Image `json:"images"`
-}
 
 func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,9 +32,9 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 }
 
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
-	albums := []Album{}
+	albums := []m.Album{}
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner, created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+	albumQuery := `SELECT a.album_id, album_name, album_owner ,created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
 				   FROM albums a
 				   JOIN albumuser au
 				   ON au.album_id=a.album_id
@@ -60,14 +45,27 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 				   ON i.image_id=ia.image_id
 				   WHERE ia.album_id=$1`
 
+	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, false as accepted
+					FROM users u
+					JOIN album_requests ar
+					ON u.user_id = ar.invited_id
+					WHERE ar.album_id = $1
+					UNION
+					SELECT u.user_id,  u.first_name, u.last_name, true as accepted
+					FROM users u
+					JOIN albumuser au
+					ON u.user_id = au.user_id
+					WHERE au.album_id = $1`
+
 	response, err := connPool.Pool.Query(ctx, albumQuery, uid)
 	if err != nil {
 		log.Print(err)
 	}
 
 	for response.Next() {
-		var album Album
+		var album m.Album
 		images := []m.Image{}
+		guests := []m.Guest{}
 
 		//Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
@@ -94,6 +92,24 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 			album.Images = images
 		}
 
+		guestResponse, err := connPool.Pool.Query(ctx, guestQuery, album.AlbumID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		for guestResponse.Next() {
+			var guest m.Guest
+
+			err := guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Accepted)
+			if err != nil {
+				log.Print(err)
+			}
+
+			guests = append(guests, guest)
+			album.InviteList = guests
+
+		}
+
 		albums = append(albums, album)
 	}
 
@@ -109,7 +125,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 }
 
 func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
-	album := Album{}
+	album := m.Album{}
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -161,7 +177,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
-	err = SendAlbumRequests(ctx, album.AlbumID, album.InvitedList, rdb, connPool)
+	err = SendAlbumRequests(ctx, album.AlbumID, album.InviteList, rdb, connPool)
 	if err != nil {
 		log.Printf("Sending album requests failed with error: %v", err)
 		return
@@ -192,7 +208,7 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 	w.Write(responseBytes)
 }
 
-func SendAlbumRequests(ctx context.Context, albumID string, invited []string, rdb *redis.Client, connPool *m.PGPool) error {
+func SendAlbumRequests(ctx context.Context, albumID string, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
 	query := `INSERT INTO album_requests (album_id, invited_id) VALUES ($1, $2) RETURNING invited_at`
 
 	for _, user := range invited {
@@ -205,7 +221,7 @@ func SendAlbumRequests(ctx context.Context, albumID string, invited []string, rd
 		}
 		wsPayload.Operation = "INSERT"
 		wsPayload.Type = "album_request"
-		wsPayload.UserID = user
+		wsPayload.UserID = user.ID
 		wsPayload.Payload = albumID
 
 		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
@@ -219,5 +235,9 @@ func SendAlbumRequests(ctx context.Context, albumID string, invited []string, rd
 		}
 	}
 
+	return nil
+}
+
+func PhaseCalculation(album *m.Album) error {
 	return nil
 }

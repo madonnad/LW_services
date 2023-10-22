@@ -12,6 +12,7 @@ type Album struct {
 	UnlockedAt   time.Time `json:"unlocked_at"`
 	RevealedAt   time.Time `json:"revealed_at"`
 	Visibility   string    `json:"visibility"`
-	InvitedList  []string  `json:"invited_list"`
+	InviteList   []Guest   `json:"invite_list"`
 	Images       []Image   `json:"images"`
+	Phase        string    `json:"phase"`
 }
