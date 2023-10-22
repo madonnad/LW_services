@@ -43,9 +43,10 @@ func AlbumFriendTextSearch(ctx context.Context, w http.ResponseWriter, connPool 
 		"size": size,
 		"query": map[string]interface{}{
 			"multi_match": map[string]interface{}{
-				"query":  searchVal,
-				"fields": []string{"name^2", "first_name", "last_name"},
-				"type":   "bool_prefix",
+				"query":    searchVal,
+				"fields":   []string{"name^4", "first_name", "last_name"},
+				"type":     "bool_prefix",
+				"analyzer": "simple",
 			},
 		},
 	}

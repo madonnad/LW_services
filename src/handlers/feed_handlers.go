@@ -32,7 +32,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 	// Join that on the list of albums to return the albums
 	//Friends List: UID -> albumuser UID: Album ID -> albums Album ID: *
 
-	albums := []Album{}
+	albums := []m.Album{}
 
 	query :=
 		`SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
@@ -62,7 +62,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 	}
 
 	for response.Next() {
-		var album Album
+		var album m.Album
 
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)

@@ -144,7 +144,7 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	w.Write(responseBytes)
 }
 
-func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *Album) {
+func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
 	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
 				   FROM images i
 				   JOIN imagealbum ia
