@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-
-	m "last_weekend_services/src/models"
 
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
@@ -32,7 +31,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 }
 
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
-	albums := []m.Album{}
+	var albums []m.Album
 
 	albumQuery := `SELECT a.album_id, album_name, album_owner ,created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
 				   FROM albums a
@@ -64,8 +63,8 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 	for response.Next() {
 		var album m.Album
-		images := []m.Image{}
-		guests := []m.Guest{}
+		var images []m.Image
+		var guests []m.Guest
 
 		//Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
@@ -109,6 +108,8 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 			album.InviteList = guests
 
 		}
+
+		err = album.PhaseCalculation()
 
 		albums = append(albums, album)
 	}
@@ -235,9 +236,5 @@ func SendAlbumRequests(ctx context.Context, albumID string, invited []m.Guest, r
 		}
 	}
 
-	return nil
-}
-
-func PhaseCalculation(album *m.Album) error {
 	return nil
 }
