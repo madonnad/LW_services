@@ -35,10 +35,12 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 	albums := []m.Album{}
 
 	query :=
-		`SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
+		`SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
 			FROM albums a
 			JOIN albumuser au
 			ON a.album_id = au.album_id
+			JOIN users u
+			ON a.album_owner = u.user_id
 			JOIN (
 				SELECT
 					CASE
@@ -49,10 +51,12 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 			ON au.user_id = fl.friend_id
 			WHERE a.visibility = 'public' OR a.visibility = 'friends'
 			UNION DISTINCT
-			SELECT a.album_id, a.album_name, a.album_owner, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
+			SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
 			FROM albums a
 			JOIN albumuser au
 			ON a.album_id = au.album_id
+			JOIN users u
+			ON a.album_owner = u.user_id
 			WHERE au.user_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
 	response, err := connPool.Pool.Query(ctx, query, uid)
@@ -64,7 +68,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 	for response.Next() {
 		var album m.Album
 
-		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
+		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			WriteErrorToWriter(w, "Scanning SQL response failed")
@@ -72,6 +76,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 		}
 
 		QueryImagesData(ctx, connPool, &album)
+		err = album.PhaseCalculation()
 
 		albums = append(albums, album)
 	}
