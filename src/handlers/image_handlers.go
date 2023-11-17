@@ -145,10 +145,12 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 }
 
 func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
-	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
+	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at
 				   FROM images i
 				   JOIN imagealbum ia
 				   ON i.image_id=ia.image_id
+				   JOIN users u
+				   ON i.image_owner=u.user_id
 				   WHERE ia.album_id=$1`
 
 	images := []m.Image{}
@@ -162,7 +164,7 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
 	for imageResponse.Next() {
 		var image m.Image
 
-		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
+		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption, &image.Upvotes, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
 		}
