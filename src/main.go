@@ -85,7 +85,8 @@ func main() {
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool))).Methods("GET")                                               // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                      // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                // Protected
-	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
+	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                             // Protected
+	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                      // Protected
 	r.Handle("/user/friend", jwtMiddleware(h.FriendEndpointHandler(ctx, connPool, rdb))).Methods("GET", "DELETE")                  // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET")                   // Protected
 	r.Handle("/notifications/album", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("POST", "DELETE")  // Protected
