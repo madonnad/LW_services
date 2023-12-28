@@ -34,7 +34,12 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				GETImageFromID(ctx, w, r, connPool)
 			}
 		case http.MethodPost:
-			POSTNewImage(ctx, w, r, connPool)
+			switch r.URL.Path {
+			case "/user/image":
+				POSTNewImage(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			case "/user/recap":
+				POSTImageToRecap(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			}
 		}
 	})
 }
@@ -110,8 +115,32 @@ func GETImageFromID(ctx context.Context, w http.ResponseWriter, r *http.Request,
 
 }
 
-func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+func POSTImageToRecap(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	imageId := r.URL.Query().Get("id")
+
+	query := `INSERT INTO imagerecap (recap_id, image_id) 
+              VALUES ((SELECT recap_storage_id FROM recap_storage WHERE user_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)), $2)`
+
+	_, err := connPool.Pool.Exec(ctx, query, uid, imageId)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to add image to recap list")
+		log.Printf("Unable to add image to recap list: %v", err)
+		return
+	}
+
+	responseBytes := []byte("Success")
+
+	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
+	w.Write(responseBytes)
+}
+
+func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	// Add image to an album - album needs to be added in the body
 	image := m.Image{}
+	var album_id string
+	var result map[string]interface{}
+
+	image.ImageOwner = uid
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -121,17 +150,48 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
-	err = json.Unmarshal(bytes, &image)
+	err = json.Unmarshal(bytes, &result)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
 		log.Print(err)
 		return
 	}
 
-	query := `INSERT INTO images
-			  (image_owner, caption) VALUES ($1, $2)
+	for key, value := range result {
+		switch key {
+		case "caption":
+			if caption, ok := value.(string); ok {
+				image.Caption = caption
+			} else {
+				fmt.Println("Value is not a string")
+			}
+		case "album_id":
+			if id, ok := value.(string); ok {
+				album_id = id
+			} else {
+				fmt.Println("Value is not a string")
+			}
+		}
+	}
+
+	imageCreationQuery := `INSERT INTO images
+			  (image_owner, caption) VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)
 			  RETURNING image_id, created_at`
-	err = connPool.Pool.QueryRow(ctx, query, image.ImageOwner, image.Caption).Scan(&image.ID, &image.CreatedAt)
+	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ImageOwner, image.Caption).Scan(&image.ID, &image.CreatedAt)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to create image in database")
+		log.Printf("Unable to create image in database: %v", err)
+		return
+	}
+
+	addImageAlbum := `INSERT INTO imagealbum
+					(image_id, album_id) VALUES ($1, $2)`
+	_, err = connPool.Pool.Exec(ctx, addImageAlbum, image.ID, album_id)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to associate image to album")
+		log.Printf("Unable to associate image to album: %v", err)
+		return
+	}
 
 	insertResponse, err := json.MarshalIndent(image, "", "\t")
 	if err != nil {
