@@ -33,11 +33,14 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
 	var albums []m.Album
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner ,created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
 				   FROM albums a
 				   JOIN albumuser au
 				   ON au.album_id=a.album_id
+				   JOIN users u
+				   ON a.album_owner=u.user_id
 				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
+
 	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
 				   FROM images i
 				   JOIN imagealbum ia
@@ -67,7 +70,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 		var guests []m.Guest
 
 		//Create Album Object
-		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner,
+		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
 			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			log.Print(err)
