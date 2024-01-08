@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-
-	m "last_weekend_services/src/models"
+	"sort"
 
 	//jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
@@ -26,8 +26,14 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			return
 		}
 		switch r.Method {
+		case http.MethodDelete:
+			DELETEImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+		case http.MethodPatch:
+			PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 		case http.MethodGet:
 			switch r.URL.Path {
+			case "/image/comment":
+				GETImageComments(ctx, w, r, connPool)
 			case "/user/image":
 				GETImagesFromUserID(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/user/album/image":
@@ -35,6 +41,8 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 		case http.MethodPost:
 			switch r.URL.Path {
+			case "/image/comment":
+				POSTNewComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/user/image":
 				POSTNewImage(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/user/recap":
@@ -44,8 +52,160 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 	})
 }
 
+func DELETEImageComment(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	commentId, err := uuid.Parse(r.URL.Query().Get("id"))
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not fetch Comment ID")
+		log.Printf("Could not fetch Comment ID: %v", err)
+		return
+	}
+
+	query := `DELETE FROM comments
+			  WHERE id=$1
+			  AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$2)`
+
+	status, err := connPool.Pool.Exec(ctx, query, commentId, uid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Comment could not be deleted")
+		log.Printf("Comment could not be deleted: %v", err)
+		return
+	}
+
+	if status.RowsAffected() < 1 {
+		WriteErrorToWriter(w, "Error: Return SQL status is not delete")
+		log.Printf("Return SQL status is not delete %v", err)
+		return
+	}
+
+	responseJSON, err := json.Marshal(true)
+	if err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseJSON)
+}
+
+func PATCHImageComment(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var comment m.UpdateComment
+	err := json.NewDecoder(r.Body).Decode(&comment)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Bad Comment")
+		log.Printf("Unable to decode new comment: %v", err)
+		return
+	}
+
+	query := `UPDATE comments
+			  SET comment_text=$1, updated_at=(now() AT TIME ZONE 'utc'::text)
+              WHERE id=$2 AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$3)`
+
+	status, err := connPool.Pool.Exec(ctx, query, comment.Comment, comment.ID, uid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Comment could not be updated")
+		log.Printf("Comment could not be updated: %v", err)
+		return
+	}
+
+	if status.RowsAffected() < 1 {
+		WriteErrorToWriter(w, "Error: Return SQL status is not update")
+		log.Printf("Return SQL status is not update %v", err)
+		return
+	}
+
+	responseJSON, err := json.Marshal(status.Update())
+	if err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseJSON)
+}
+
+func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	var comments []m.Comment
+	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Couldn't get image id from request")
+		log.Printf("Couldn't get image id from request: %v", err)
+		return
+	}
+
+	query := `SELECT c.id, c.image_id, u.user_id, u.first_name, u.last_name ,c.comment_text, c.created_at, c.updated_at
+				FROM comments c
+				JOIN  users u
+				ON u.user_id = c.user_id
+				WHERE image_id=$1`
+
+	result, err := connPool.Pool.Query(ctx, query, imageId)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Unable to query comments from DB")
+		log.Printf("Unable to query comments from DB: %v", err)
+		return
+	}
+
+	for result.Next() {
+		var comment m.Comment
+		err := result.Scan(&comment.ID, &comment.ImageID, &comment.UserID, &comment.FirstName, &comment.LastName, &comment.Comment, &comment.CreatedAt)
+		if err != nil {
+			WriteErrorToWriter(w, "Error: Failed to unpack response from DB")
+			log.Printf("Failed to unpack response from DB: %v", err)
+			return
+		}
+
+		comments = append(comments, comment)
+	}
+
+	sort.Slice(comments, func(i, j int) bool {
+		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
+	})
+
+	var responseBytes []byte
+	responseBytes, err = json.MarshalIndent(comments, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
+func POSTNewComment(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var newComment m.NewComment
+	var newUid string
+
+	err := json.NewDecoder(r.Body).Decode(&newComment)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Bad Comment")
+		log.Printf("Unable to decode new comment: %v", err)
+		return
+	}
+
+	query := `INSERT INTO comments (comment_text, image_id, user_id)
+			  VALUES ($1, $2, (SELECT user_id FROM users WHERE auth_zero_id=$3)) RETURNING id`
+
+	result := connPool.Pool.QueryRow(ctx, query, newComment.Comment, newComment.ImageID, uid)
+
+	err = result.Scan(&newUid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Couldn't post comment")
+		log.Printf("Couldn't post comment: %v", err)
+		return
+	}
+
+	responseJSON, err := json.Marshal(newUid)
+	if err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseJSON)
+}
+
 func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
-	images := []m.Image{}
+	var images []m.Image
 
 	query := `
 			SELECT image_id, image_owner, caption, upvotes, created_at
