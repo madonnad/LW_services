@@ -31,6 +31,8 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				DELETEImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/like":
 				DELETEImageLike(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			case "/image/upvote":
+				DELETEImageUpvote(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
 		case http.MethodPatch:
 			PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
@@ -45,6 +47,8 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 		case http.MethodPost:
 			switch r.URL.Path {
+			case "/image/upvote":
+				POSTImageUpvote(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/like":
 				POSTImageLike(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/comment":
@@ -56,6 +60,69 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 		}
 	})
+}
+func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not parse image id from request")
+		log.Printf("Could not parse image id from request: %v", err)
+		return
+	}
+
+	query := `DELETE FROM upvotes
+			  WHERE image_id=$1
+			  AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$2)`
+
+	status, err := connPool.Pool.Exec(ctx, query, imageId, uid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Upvote could not be deleted")
+		log.Printf("Upvote could not be deleted: %v", err)
+		return
+	}
+
+	if status.RowsAffected() < 1 {
+		WriteErrorToWriter(w, "Error: Return SQL status is not delete")
+		log.Printf("Return SQL status is not delete %v", err)
+		return
+	}
+
+	responseJSON, err := json.Marshal(true)
+	if err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseJSON)
+
+}
+
+func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not parse image id from request")
+		log.Printf("Could not parse image id from request: %v", err)
+		return
+	}
+
+	query := `INSERT INTO upvotes (user_id, image_id)
+			  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)`
+
+	_, err = connPool.Pool.Exec(ctx, query, uid, imageId)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Image could not be upvoted")
+		log.Printf("Image could not be upvoted: %v", err)
+		return
+	}
+
+	responseJSON, err := json.Marshal(true)
+	if err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseJSON)
 }
 
 func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
@@ -73,7 +140,7 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 	status, err := connPool.Pool.Exec(ctx, query, imageId, uid)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Like could not be deleted")
-		log.Printf("Comment could not be deleted: %v", err)
+		log.Printf("Like could not be deleted: %v", err)
 		return
 	}
 
