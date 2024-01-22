@@ -502,13 +502,16 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 }
 
 func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
-	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at
-				   FROM images i
-				   JOIN imagealbum ia
-				   ON i.image_id=ia.image_id
-				   JOIN users u
-				   ON i.image_owner=u.user_id
-				   WHERE ia.album_id=$1`
+	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at,
+					   ARRAY_AGG(upv.user_id) AS upvoted_user_ids,
+					   ARRAY_AGG(lik.user_id) AS liked_user_ids
+					FROM images i
+					JOIN imagealbum ia ON i.image_id = ia.image_id
+					JOIN users u ON i.image_owner = u.user_id
+					LEFT JOIN upvotes upv ON i.image_id = upv.image_id
+					LEFT JOIN likes lik ON i.image_id = lik.image_id
+					WHERE ia.album_id = $1
+					GROUP BY i.image_id, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at;`
 
 	images := []m.Image{}
 
@@ -521,7 +524,8 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
 	for imageResponse.Next() {
 		var image m.Image
 
-		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption, &image.Upvotes, &image.CreatedAt)
+		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
+			&image.Upvotes, &image.CreatedAt, &image.UpvotedUsers, &image.LikedUsers)
 		if err != nil {
 			log.Print(err)
 		}
