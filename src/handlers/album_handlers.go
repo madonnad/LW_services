@@ -41,12 +41,6 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 				   ON a.album_owner=u.user_id
 				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
-	imageQuery := `SELECT i.image_id, image_owner, caption, upvotes, created_at
-				   FROM images i
-				   JOIN imagealbum ia
-				   ON i.image_id=ia.image_id
-				   WHERE ia.album_id=$1`
-
 	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, false as accepted
 					FROM users u
 					JOIN album_requests ar
@@ -66,7 +60,6 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 
 	for response.Next() {
 		var album m.Album
-		var images []m.Image
 		var guests []m.Guest
 
 		//Create Album Object
@@ -77,22 +70,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 		}
 
 		//Fetch Albums Images
-		imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID)
-		if err != nil {
-			log.Print(err)
-		}
-
-		for imageResponse.Next() {
-			var image m.Image
-
-			err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
-			if err != nil {
-				log.Print(err)
-			}
-
-			images = append(images, image)
-			album.Images = images
-		}
+		QueryImagesData(ctx, connPool, &album)
 
 		guestResponse, err := connPool.Pool.Query(ctx, guestQuery, album.AlbumID)
 		if err != nil {
