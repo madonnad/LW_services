@@ -502,16 +502,22 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 }
 
 func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
-	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at,
-					   ARRAY_AGG(upv.user_id) AS upvoted_user_ids,
-					   ARRAY_AGG(lik.user_id) AS liked_user_ids
-					FROM images i
-					JOIN imagealbum ia ON i.image_id = ia.image_id
-					JOIN users u ON i.image_owner = u.user_id
-					LEFT JOIN upvotes upv ON i.image_id = upv.image_id
-					LEFT JOIN likes lik ON i.image_id = lik.image_id
-					WHERE ia.album_id = $1
-					GROUP BY i.image_id, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at;`
+	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at
+				   FROM images i
+				   JOIN imagealbum ia
+				   ON i.image_id=ia.image_id
+				   JOIN users u
+				   ON i.image_owner=u.user_id
+				   WHERE ia.album_id=$1`
+
+	likeQuery := `SELECT l.user_id, u.first_name, u.last_name
+					FROM likes l 
+					JOIN users u ON l.user_id = u.user_id
+					WHERE l.image_id=$1`
+	upvoteQuery := `SELECT up.user_id, u.first_name, u.last_name
+					FROM upvotes up
+					JOIN users u ON up.user_id = u.user_id
+					WHERE up.image_id=$1`
 
 	images := []m.Image{}
 
@@ -521,14 +527,55 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
 		log.Print(err)
 	}
 
+	//Scan through images in album
 	for imageResponse.Next() {
 		var image m.Image
+		likedUsers := []m.User{}
+		upvotedUsers := []m.User{}
 
 		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
-			&image.Upvotes, &image.CreatedAt, &image.UpvotedUsers, &image.LikedUsers)
+			&image.Upvotes, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
 		}
+
+		// Look up users who liked the image
+		likeResponse, err := connPool.Pool.Query(ctx, likeQuery, image.ID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		// Scan the liked users
+		for likeResponse.Next() {
+			var user m.User
+
+			err := likeResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
+			if err != nil {
+				log.Print(err)
+			}
+			likedUsers = append(likedUsers, user)
+		}
+
+		// Look up users who upvoted an image
+		upvoteResponse, err := connPool.Pool.Query(ctx, upvoteQuery, image.ID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		// Scan the upvoted users
+		for upvoteResponse.Next() {
+			var user m.User
+
+			err := upvoteResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
+			if err != nil {
+				log.Print(err)
+			}
+			upvotedUsers = append(upvotedUsers, user)
+		}
+
+		// Add liked and upvoted user lists to image
+		image.LikedUsers = likedUsers
+		image.UpvotedUsers = upvotedUsers
 
 		images = append(images, image)
 	}
