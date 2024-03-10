@@ -75,7 +75,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 			log.Printf("Scanning the response failed with: %v", err)
 		}
 
-		QueryImagesData(ctx, connPool, &album)
+		QueryImagesData(ctx, connPool, &album, uid)
 		err = album.PhaseCalculation()
 
 		albums = append(albums, album)
