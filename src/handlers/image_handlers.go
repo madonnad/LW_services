@@ -62,6 +62,8 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 	})
 }
 func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var engagement m.Engagement
+
 	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not parse image id from request")
@@ -86,7 +88,17 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	responseJSON, err := json.Marshal(true)
+	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
+
+	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
+	err = countResponse.Scan(&engagement.Count)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get upvote count")
+		log.Printf("Could not get upvote count: %v", err)
+		return
+	}
+
+	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -98,6 +110,8 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 }
 
 func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var engagement m.Engagement
+
 	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not parse image id from request")
@@ -115,7 +129,17 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	responseJSON, err := json.Marshal(true)
+	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
+
+	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
+	err = countResponse.Scan(&engagement.Count)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get upvote count")
+		log.Printf("Could not get upvote count: %v", err)
+		return
+	}
+
+	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -126,6 +150,8 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 }
 
 func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var engagement m.Engagement
+
 	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not parse image id from request")
@@ -150,7 +176,17 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	responseJSON, err := json.Marshal(true)
+	countQuery := `SELECT COUNT(*) FROM likes WHERE image_id=$1`
+
+	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
+	err = countResponse.Scan(&engagement.Count)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get like count")
+		log.Printf("Could not get like count: %v", err)
+		return
+	}
+
+	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -158,10 +194,11 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseJSON)
-
 }
 
 func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	var engagement m.Engagement
+
 	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not parse image id from request")
@@ -179,7 +216,17 @@ func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	responseJSON, err := json.Marshal(true)
+	countQuery := `SELECT COUNT(*) FROM likes WHERE image_id=$1`
+
+	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
+	err = countResponse.Scan(&engagement.Count)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get like count")
+		log.Printf("Could not get like count: %v", err)
+		return
+	}
+
+	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -501,28 +548,22 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	w.Write(responseBytes)
 }
 
-func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
-	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upvotes, i.created_at
-				   FROM images i
-				   JOIN imagealbum ia
-				   ON i.image_id=ia.image_id
-				   JOIN users u
-				   ON i.image_owner=u.user_id
-				   WHERE ia.album_id=$1`
-
-	likeQuery := `SELECT l.user_id, u.first_name, u.last_name
-					FROM likes l 
-					JOIN users u ON l.user_id = u.user_id
-					WHERE l.image_id=$1`
-	upvoteQuery := `SELECT up.user_id, u.first_name, u.last_name
-					FROM upvotes up
-					JOIN users u ON up.user_id = u.user_id
-					WHERE up.image_id=$1`
+func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, uid string) {
+	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption,
+                      (SELECT COUNT(*) FROM likes l WHERE l.image_id = i.image_id) AS like_count,
+                      (SELECT COUNT(*) FROM upvotes up WHERE up.image_id = i.image_id) AS upvote_count,
+                      EXISTS (SELECT 1 FROM likes l WHERE l.image_id = i.image_id AND l.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2)) AS user_has_liked,
+                      EXISTS (SELECT 1 FROM upvotes up WHERE up.image_id = i.image_id AND up.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2)) AS user_has_upvoted,
+                      i.created_at
+					  FROM images i
+					  JOIN imagealbum ia ON i.image_id = ia.image_id
+					  JOIN users u ON i.image_owner = u.user_id
+					  WHERE ia.album_id = $1`
 
 	images := []m.Image{}
 
 	//Fetch Albums Images
-	imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID)
+	imageResponse, err := connPool.Pool.Query(ctx, imageQuery, album.AlbumID, uid)
 	if err != nil {
 		log.Print(err)
 	}
@@ -530,54 +571,43 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album) {
 	//Scan through images in album
 	for imageResponse.Next() {
 		var image m.Image
-		likedUsers := []m.User{}
-		upvotedUsers := []m.User{}
 
 		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
-			&image.Upvotes, &image.CreatedAt)
+			&image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
 		}
-
-		// Look up users who liked the image
-		likeResponse, err := connPool.Pool.Query(ctx, likeQuery, image.ID)
-		if err != nil {
-			log.Print(err)
-		}
-
-		// Scan the liked users
-		for likeResponse.Next() {
-			var user m.User
-
-			err := likeResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
-			if err != nil {
-				log.Print(err)
-			}
-			likedUsers = append(likedUsers, user)
-		}
-
-		// Look up users who upvoted an image
-		upvoteResponse, err := connPool.Pool.Query(ctx, upvoteQuery, image.ID)
-		if err != nil {
-			log.Print(err)
-		}
-
-		// Scan the upvoted users
-		for upvoteResponse.Next() {
-			var user m.User
-
-			err := upvoteResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
-			if err != nil {
-				log.Print(err)
-			}
-			upvotedUsers = append(upvotedUsers, user)
-		}
-
-		// Add liked and upvoted user lists to image
-		image.LikedUsers = likedUsers
-		image.UpvotedUsers = upvotedUsers
 
 		images = append(images, image)
 	}
 	album.Images = images
 }
+
+//likeQuery := `SELECT l.user_id, u.first_name, u.last_name
+//					FROM likes l
+//					JOIN users u ON l.user_id = u.user_id
+//					WHERE l.image_id=$1`
+
+// likedUsers := []m.User{}
+
+// Look up users who liked the image
+//likeResponse, err := connPool.Pool.Query(ctx, likeQuery, image.ID)
+//if err != nil {
+//log.Print(err)
+//}
+
+//// Scan the liked users
+//for likeResponse.Next() {
+//var user m.User
+
+//err := likeResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
+//if err != nil {
+//log.Print(err)
+//}
+//likedUsers = append(likedUsers, user)
+//}
+
+//upvoteQuery := `SELECT up.user_id, u.first_name, u.last_name
+//					FROM upvotes up
+//					JOIN users u ON up.user_id = u.user_id
+//					WHERE up.image_id=$1`

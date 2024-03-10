@@ -70,7 +70,7 @@ func GETAlbumsByUID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 		}
 
 		//Fetch Albums Images
-		QueryImagesData(ctx, connPool, &album)
+		QueryImagesData(ctx, connPool, &album, uid)
 
 		guestResponse, err := connPool.Pool.Query(ctx, guestQuery, album.AlbumID)
 		if err != nil {
@@ -126,7 +126,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	newImageQuery := `INSERT INTO images
 					  (image_owner, caption)
-					  VALUES ($1, $2) RETURNING image_id`
+					  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2) RETURNING image_id`
 
 	err = connPool.Pool.QueryRow(ctx, newImageQuery, uid, album.AlbumName).Scan(&album.AlbumCoverID)
 	if err != nil {
@@ -137,11 +137,11 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	createAlbumQuery := `INSERT INTO albums
 						  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
-						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6) RETURNING album_id, created_at`
+						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6) RETURNING album_id, created_at, album_owner`
 
 	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
 		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
-		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt)
+		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
@@ -195,7 +195,7 @@ func SendAlbumRequests(ctx context.Context, albumID string, invited []m.Guest, r
 
 	for _, user := range invited {
 		var wsPayload WebSocketPayload
-		result := connPool.Pool.QueryRow(ctx, query, albumID, user)
+		result := connPool.Pool.QueryRow(ctx, query, albumID, user.ID)
 		err := result.Scan(&wsPayload.Received)
 		if err != nil {
 			log.Printf("Failed to add user to album request table: %v", err)
