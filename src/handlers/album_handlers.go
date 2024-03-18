@@ -159,7 +159,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
-	err = SendAlbumRequests(ctx, album.AlbumID, album.InviteList, rdb, connPool)
+	err = SendAlbumRequests(ctx, &album, album.InviteList, rdb, connPool)
 	if err != nil {
 		log.Printf("Sending album requests failed with error: %v", err)
 		return
@@ -190,12 +190,12 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 	w.Write(responseBytes)
 }
 
-func SendAlbumRequests(ctx context.Context, albumID string, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
+func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
 	query := `INSERT INTO album_requests (album_id, invited_id) VALUES ($1, $2) RETURNING invited_at`
 
 	for _, user := range invited {
 		var wsPayload WebSocketPayload
-		result := connPool.Pool.QueryRow(ctx, query, albumID, user.ID)
+		result := connPool.Pool.QueryRow(ctx, query, album.AlbumID, user.ID)
 		err := result.Scan(&wsPayload.Received)
 		if err != nil {
 			log.Printf("Failed to add user to album request table: %v", err)
@@ -204,7 +204,7 @@ func SendAlbumRequests(ctx context.Context, albumID string, invited []m.Guest, r
 		wsPayload.Operation = "INSERT"
 		wsPayload.Type = "album_request"
 		wsPayload.UserID = user.ID
-		wsPayload.Payload = albumID
+		wsPayload.Payload = album
 
 		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
 		if err != nil {
