@@ -54,6 +54,7 @@ func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcp
 	imageReader, err := obj.NewReader(ctx)
 	if err != nil {
 		log.Printf("%v", err)
+		return
 	}
 
 	imageBytes, err := io.ReadAll(imageReader)

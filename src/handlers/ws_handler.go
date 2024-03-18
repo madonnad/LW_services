@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"log"
 	"net/http"
 	"time"
@@ -32,15 +34,20 @@ type WebSocketPayload struct {
 	Payload   interface{} `json:"payload"`
 }
 
-var uid = "69ac1008-60f8-4518-8039-e332c9265115"
+//ar uid = "69ac1008-60f8-4518-8039-e332c9265115"
 
 func WebSocketEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		WebSocket(w, r, connPool, rdb, ctx)
+		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		if !ok {
+			log.Printf("Failed to get validated claims")
+			return
+		}
+		WebSocket(w, r, connPool, rdb, ctx, claims.RegisteredClaims.Subject)
 	})
 }
 
-func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context) {
+func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context, uid string) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(500)
@@ -48,15 +55,15 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 		return
 	}
 
-	var newConnection ConnectionState = ConnectionState{Conn: conn, Active: true}
+	var newConnection = ConnectionState{Conn: conn, Active: true}
 
 	log.Print("Listening via WebSocket...")
-	go newConnection.ListenAndWrite(ctx, connPool, conn, rdb)
+	go newConnection.ListenAndWrite(ctx, connPool, conn, rdb, uid)
 	go newConnection.CheckConnectionStatus(ctx, conn)
 
 }
 
-func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, rdb *redis.Client) {
+func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, rdb *redis.Client, uid string) {
 	//queryTime := time.Now().UTC()
 	//updatedTime := queryTime
 
@@ -67,7 +74,10 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 
 		for message := range ch {
 			var wsPayload WebSocketPayload
-			json.Unmarshal([]byte(message.Payload), &wsPayload)
+			err := json.Unmarshal([]byte(message.Payload), &wsPayload)
+			if err != nil {
+				return
+			}
 
 			//log.Print(wsPayload.UserID)
 			if wsPayload.UserID == uid {
@@ -99,40 +109,40 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 	}
 }
 
-func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
-	var wsPayload WebSocketPayload
-	var user m.User
-	var receivedLocal time.Time
-
-	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
-						  FROM users u
-						  JOIN friend_requests fr ON fr.sender_id = u.user_id
-						  WHERE fr.receiver_id = $1 AND fr.requested_at > $2`
-	rows, err := connPool.Pool.Query(ctx, notificationQuery, uid, *queryTime)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		wsPayload.Type = "friend_request"
-		wsPayload.Operation = "INSERT"
-
-		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &receivedLocal)
-		if err != nil {
-			return err
-		}
-
-		wsPayload.Payload = user
-		wsPayload.Received = receivedLocal.UTC()
-
-		if wsPayload.Received.After(*updatedTime) {
-			*updatedTime = wsPayload.Received
-		}
-		if err := writeNotification(conn, wsPayload); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+//func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
+//	var wsPayload WebSocketPayload
+//	var user m.User
+//	var receivedLocal time.Time
+//
+//	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
+//						  FROM users u
+//						  JOIN friend_requests fr ON fr.sender_id = u.user_id
+//						  WHERE fr.receiver_id = $1 AND fr.requested_at > $2`
+//	rows, err := connPool.Pool.Query(ctx, notificationQuery, uid, *queryTime)
+//	if err != nil {
+//		return err
+//	}
+//	for rows.Next() {
+//		wsPayload.Type = "friend_request"
+//		wsPayload.Operation = "INSERT"
+//
+//		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &receivedLocal)
+//		if err != nil {
+//			return err
+//		}
+//
+//		wsPayload.Payload = user
+//		wsPayload.Received = receivedLocal.UTC()
+//
+//		if wsPayload.Received.After(*updatedTime) {
+//			*updatedTime = wsPayload.Received
+//		}
+//		if err := writeNotification(conn, wsPayload); err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
 
 /*func NotificationCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
 	var wsPayload WebSocketPayload
