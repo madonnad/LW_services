@@ -98,6 +98,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 		}
 		responseBytes := []byte(errorString)
 
+		w.WriteHeader(http.StatusNoContent)
 		w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 		w.Write(responseBytes)
 	}
