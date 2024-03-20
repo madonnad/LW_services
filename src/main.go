@@ -62,8 +62,8 @@ func main() {
 	//log.Printf("OpenSearch Client Connected: %v", openSearchClient.Info)
 
 	// ---------------------------------------------------------------------------------------
-	//Only need the InitOpenSearch to run if we need to repopulate OpenSearch with the DB data
-	//i.InitOpenSearch(ctx, connPool, openSearchClient)
+	// Only need the InitOpenSearch to run if we need to repopulate OpenSearch with the DB data
+	// i.InitOpenSearch(ctx, connPool, openSearchClient)
 	// ---------------------------------------------------------------------------------------
 
 	//Server Starting String
@@ -85,7 +85,7 @@ func main() {
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                    // Protected
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                  // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                   // Protected
-	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET", "POST")                                   // Protected
+	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx, openSearchClient))).Methods("GET", "POST")                 // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                 // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                              // Protected
