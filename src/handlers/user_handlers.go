@@ -6,16 +6,20 @@ import (
 	"fmt"
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
+	"github.com/opensearch-project/opensearch-go"
+	"github.com/opensearch-project/opensearch-go/opensearchapi"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	m "last_weekend_services/src/models"
 
 	"github.com/jackc/pgx/v5"
 )
 
-func UserEndpointHandler(connPool *m.PGPool, ctx context.Context) http.HandlerFunc {
+func UserEndpointHandler(connPool *m.PGPool, ctx context.Context, osClient *opensearch.Client) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -25,15 +29,16 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context) http.HandlerFu
 
 		switch r.Method {
 		case http.MethodPost:
-			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject, osClient)
 		case http.MethodGet:
-			GETAuthUserInformation(w, r, connPool, claims.RegisteredClaims.Subject)
+			GETAuthUserInformation(w, connPool, claims.RegisteredClaims.Subject)
 		}
 	})
 }
 
-func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authZeroId string, osClient *opensearch.Client) {
 	var user m.User
+	var uid string
 
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -50,15 +55,39 @@ func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	query := `INSERT INTO users (first_name, last_name, auth_zero_id) VALUES ($1, $2, $3)`
+	query := `INSERT INTO users (first_name, last_name, auth_zero_id) VALUES ($1, $2, $3) RETURNING user_id`
 
-	_, err = connPool.Pool.Exec(ctx, query, user.FirstName, user.LastName, uid)
+	result := connPool.Pool.QueryRow(ctx, query, user.FirstName, user.LastName, authZeroId)
+	err = result.Scan(&uid)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create new user entry")
 		log.Printf("Unable to create new user entry: %v", err)
 		return
 	}
 
+	// Add to OpenSearch Database
+	// Prepare - Prepare struct to be added to opensearch
+	name := fmt.Sprintf("%s %s", user.FirstName, user.CreatedAt)
+	osUser := m.Search{ID: uid, Name: name, FirstName: user.FirstName, LastName: user.LastName, ResultType: "user"}
+
+	// Format the JSON Format to be Accepted
+	data, err := json.MarshalIndent(osUser, "", "\t")
+	document := strings.NewReader(string(data))
+
+	// Process Request
+	req := opensearchapi.IndexRequest{
+		Index:      "global-search",
+		DocumentID: osUser.ID,
+		Body:       document,
+	}
+	insertResponse, err := req.Do(ctx, osClient)
+	if err != nil {
+		fmt.Println("failed to insert document ", err)
+		os.Exit(1)
+	}
+	defer insertResponse.Body.Close()
+
+	// Send success to the client
 	responseBytes, err := json.MarshalIndent("account created - success", "", "\t")
 	if err != nil {
 		log.Panic(err)
@@ -69,7 +98,7 @@ func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request,
 	w.Write(responseBytes)
 }
 
-func GETAuthUserInformation(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+func GETAuthUserInformation(w http.ResponseWriter, connPool *m.PGPool, uid string) {
 	var user m.User
 
 	sqlQuery := "SELECT user_id, created_at, first_name, last_name FROM users WHERE auth_zero_id=$1"
