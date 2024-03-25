@@ -86,6 +86,7 @@ func main() {
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                  // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                   // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx, openSearchClient))).Methods("GET", "POST")                 // Protected
+	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx, openSearchClient))).Methods("GET")                      // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                 // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                              // Protected
