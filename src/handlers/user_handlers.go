@@ -31,7 +31,12 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context, osClient *open
 		case http.MethodPost:
 			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject, osClient)
 		case http.MethodGet:
-			GETAuthUserInformation(w, connPool, claims.RegisteredClaims.Subject)
+			switch r.URL.Path {
+			case "/user":
+				GETAuthUserInformation(w, connPool, claims.RegisteredClaims.Subject)
+			case "/user/id":
+				GETUserByUID(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			}
 		}
 	})
 }
@@ -130,4 +135,95 @@ func GETAuthUserInformation(w http.ResponseWriter, connPool *m.PGPool, uid strin
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBytes)
 
+}
+
+func GETUserByUID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authUserID string) {
+	friendID := r.URL.Query().Get("id")
+	searchResult := m.SearchedUser{ID: friendID}
+	var albumIDs []string
+	batch := &pgx.Batch{}
+
+	//Name Query
+	nameQuery := `SELECT first_name, last_name FROM users WHERE user_id = $1`
+	batch.Queue(nameQuery, friendID)
+
+	// Friend Status Query
+	friendStatusQuery := `SELECT COALESCE(
+							(
+							SELECT 'friends'
+							FROM friends
+							WHERE (
+							    user1_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) AND user2_id = $2) OR 
+							    (user1_id = $2 AND user2_id = (SELECT user_id FROM users WHERE auth_zero_id=$1))
+							),
+							(
+							SELECT 'pending'
+							FROM friend_requests
+							WHERE (
+							    sender_id = (SELECT user_id FROM users WHERE auth_zero_id=$1) AND receiver_id = $2) OR 
+							    (sender_id = $2 AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1))
+							),
+							'not friends'
+							) as status;`
+	batch.Queue(friendStatusQuery, authUserID, friendID)
+
+	// Friend Count Query
+	friendCountQuery := `SELECT COUNT(*)
+					FROM friends
+					WHERE user1_id = $1 OR user2_id = $1;`
+	batch.Queue(friendCountQuery, friendID)
+
+	// Revealed Albums Query
+	usersRevealedAlbumQuery := `SELECT a.album_id
+								FROM albumuser au
+								JOIN albums a ON au.album_id = a.album_id
+								WHERE au.user_id = $1
+								AND a.revealed_at < CURRENT_DATE;`
+	batch.Queue(usersRevealedAlbumQuery, friendID)
+
+	// Execute the batch
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	// Query the Name Results
+	row := batchResults.QueryRow()
+	err := row.Scan(&searchResult.FirstName, &searchResult.LastName)
+	if err != nil {
+		log.Print(err)
+	}
+
+	row = batchResults.QueryRow()
+	err = row.Scan(&searchResult.FriendStatus)
+	if err != nil {
+		log.Print(err)
+	}
+
+	row = batchResults.QueryRow()
+	err = row.Scan(&searchResult.FriendCount)
+	if err != nil {
+		log.Print(err)
+	}
+
+	rows, err := batchResults.Query()
+	if err != nil {
+		log.Print(err)
+
+	}
+	for rows.Next() {
+		var albumID string
+		err = rows.Scan(&albumID)
+		if err != nil {
+			log.Print(err)
+		}
+		albumIDs = append(albumIDs, albumID)
+	}
+	searchResult.AlbumIDs = albumIDs
+
+	responseBytes, err := json.MarshalIndent(searchResult, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
 }
