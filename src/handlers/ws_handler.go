@@ -6,11 +6,9 @@ import (
 	"fmt"
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
+	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-	"time"
-
-	m "last_weekend_services/src/models"
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -29,7 +27,6 @@ type ConnectionState struct {
 type WebSocketPayload struct {
 	Operation string      `json:"operation"`
 	Type      string      `json:"type"`
-	Received  time.Time   `json:"received"`
 	UserID    string      `json:"user_id"`
 	Payload   interface{} `json:"payload"`
 }
@@ -47,11 +44,20 @@ func WebSocketEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context
 	})
 }
 
-func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context, uid string) {
+func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context, auth0UID string) {
+	var uid string
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "failed to upgrade websocket: %s", err)
+		return
+	}
+
+	uidQuery := `SELECT user_id FROM users WHERE auth_zero_id = $1`
+	err = connPool.Pool.QueryRow(ctx, uidQuery, auth0UID).Scan(&uid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Unable to lookup requesting user")
+		log.Printf("Unable to lookup requesting user: %v", err)
 		return
 	}
 
@@ -69,23 +75,15 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 
 	for connectionState.Active == true {
 
-		pubsub := rdb.Subscribe(ctx, "album-requests")
-		ch := pubsub.Channel()
+		pubSub := rdb.Subscribe(ctx, "notifications")
+		notificationChannel := pubSub.Channel()
 
-		for message := range ch {
-			var wsPayload WebSocketPayload
-			err := json.Unmarshal([]byte(message.Payload), &wsPayload)
+		// Handle All Notifications to WebSocket Notification
+		for message := range notificationChannel {
+			err := sendWebSocketNotification(conn, message, uid)
 			if err != nil {
+				log.Print(err)
 				return
-			}
-
-			//log.Print(wsPayload.UserID)
-			if wsPayload.UserID == uid {
-				err := conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
-				if err != nil {
-					log.Print(err)
-					return
-				}
 			}
 		}
 
@@ -109,98 +107,20 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 	}
 }
 
-//func FriendRequestCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
-//	var wsPayload WebSocketPayload
-//	var user m.User
-//	var receivedLocal time.Time
-//
-//	notificationQuery := `SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
-//						  FROM users u
-//						  JOIN friend_requests fr ON fr.sender_id = u.user_id
-//						  WHERE fr.receiver_id = $1 AND fr.requested_at > $2`
-//	rows, err := connPool.Pool.Query(ctx, notificationQuery, uid, *queryTime)
-//	if err != nil {
-//		return err
-//	}
-//	for rows.Next() {
-//		wsPayload.Type = "friend_request"
-//		wsPayload.Operation = "INSERT"
-//
-//		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &receivedLocal)
-//		if err != nil {
-//			return err
-//		}
-//
-//		wsPayload.Payload = user
-//		wsPayload.Received = receivedLocal.UTC()
-//
-//		if wsPayload.Received.After(*updatedTime) {
-//			*updatedTime = wsPayload.Received
-//		}
-//		if err := writeNotification(conn, wsPayload); err != nil {
-//			return err
-//		}
-//	}
-//	return nil
-//}
-
-/*func NotificationCheck(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, queryTime *time.Time, updatedTime *time.Time) error {
+func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid string) error {
 	var wsPayload WebSocketPayload
-	var user User
-	var genericNotification m.GenericNotification
-	var receivedLocal time.Time
-	notificationQuery := `SELECT n.sender_id, u.first_name, u.last_name, n.media_id, a.album_name, n.notification_type, n.notification_seen, n.received_at
-						  FROM users u
-						  JOIN notifications n ON n.sender_id = u.user_id
-						  JOIN albums a ON n.album_id = a.album_id
-						  WHERE n.receiver_id = $1 AND n.received_at > $2`
-
-	rows, err := connPool.Pool.Query(ctx, notificationQuery, uid, queryTime)
+	err := json.Unmarshal([]byte(message.Payload), &wsPayload)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		wsPayload.Type = "generic_notification"
-		wsPayload.Operation = "INSERT"
 
-		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &genericNotification.MediaID, &genericNotification.AlbumName, &genericNotification.NotificationType, &genericNotification.NotificationSeen, &receivedLocal)
+	// TODO: May need to look into moving this higher up the function - it may get busy if every user has to check this
+	if wsPayload.UserID == uid {
+		err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
 		if err != nil {
-			return err
-		}
-		genericNotification.Notifier = user
-		wsPayload.Payload = genericNotification
-		wsPayload.Received = receivedLocal.UTC()
-
-		if wsPayload.Received.After(*updatedTime) {
-			*updatedTime = wsPayload.Received
-		}
-		if err := writeNotification(conn, wsPayload); err != nil {
+			log.Print(err)
 			return err
 		}
 	}
 	return nil
-}*/
-
-func writeNotification(conn *websocket.Conn, n WebSocketPayload) error {
-	responseBytes, err := json.MarshalIndent(n, "", "\t")
-	if err != nil {
-		return err
-	}
-	err = conn.WriteMessage(websocket.TextMessage, responseBytes)
-
-	if err != nil {
-		if websocket.IsUnexpectedCloseError(err) {
-			log.Println("Warning: The server unexpectedly closed!")
-			conn.Close()
-			return err
-		}
-		log.Print(err)
-		return err
-	}
-	log.Printf("Sent: %v, Operation: %v, Received At: %v\n", n.Type, n.Operation, n.Received)
-	if err != nil {
-		log.Print(err)
-
-	}
-	return err
 }

@@ -278,27 +278,27 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 	query := `INSERT INTO album_requests (album_id, invited_id) VALUES ($1, $2) RETURNING invited_at`
 
 	for _, user := range invited {
-		var wsPayload WebSocketPayload
+		//var wsPayload WebSocketPayload
 		result := connPool.Pool.QueryRow(ctx, query, album.AlbumID, user.ID)
-		err := result.Scan(&wsPayload.Received)
+		err := result.Scan()
 		if err != nil {
 			log.Printf("Failed to add user to album request table: %v", err)
 			return err
 		}
-		wsPayload.Operation = "INSERT"
-		wsPayload.Type = "album_request"
-		wsPayload.UserID = user.ID
-		wsPayload.Payload = album
-
-		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
-		if err != nil {
-			log.Print(err)
-		}
-
-		err = rdb.Publish(ctx, "album-requests", jsonPayload).Err()
-		if err != nil {
-			log.Print(err)
-		}
+		//wsPayload.Operation = "INSERT"
+		//wsPayload.Type = "albumRequest"
+		//wsPayload.UserID = user.ID
+		//wsPayload.Payload = album
+		//
+		//jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+		//if err != nil {
+		//	log.Print(err)
+		//}
+		//
+		//err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+		//if err != nil {
+		//	log.Print(err)
+		//}
 	}
 
 	return nil
