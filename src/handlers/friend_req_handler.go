@@ -33,7 +33,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	receivingID := r.URL.Query().Get("id")
 	wsPayload := WebSocketPayload{
 		Operation: "INSERT",
-		Type:      "friendRequest",
+		Type:      "friend-request",
 		UserID:    receivingID,
 	}
 

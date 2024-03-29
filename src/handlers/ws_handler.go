@@ -64,12 +64,12 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 	var newConnection = ConnectionState{Conn: conn, Active: true}
 
 	log.Print("Listening via WebSocket...")
-	go newConnection.ListenAndWrite(ctx, connPool, conn, rdb, uid)
+	go newConnection.ListenAndWrite(ctx, conn, rdb, uid)
 	go newConnection.CheckConnectionStatus(ctx, conn)
 
 }
 
-func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, connPool *m.PGPool, conn *websocket.Conn, rdb *redis.Client, uid string) {
+func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string) {
 	//queryTime := time.Now().UTC()
 	//updatedTime := queryTime
 
@@ -96,13 +96,18 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn) {
 
 	for {
-		_, _, err := conn.ReadMessage()
+		messageType, _, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err) {
 				log.Printf("error: %v", err)
 				connectionState.Active = false
 				return
 			}
+		}
+
+		if messageType == 1000 {
+			connectionState.Active = false
+			return
 		}
 	}
 }
