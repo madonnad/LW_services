@@ -30,26 +30,18 @@ func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *
 			case "/notifications/album":
 				albumID := r.URL.Query().Get("album_id")
 				DeleteAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
-			case "/notifications/friend":
-				friendID := r.URL.Query().Get("friend_id")
-				DeleteFriendRequest(ctx, w, connPool, friendID, claims.RegisteredClaims.Subject)
 			}
 		case http.MethodPost:
 			switch r.URL.Path {
 			case "/notifications/album":
 				albumID := r.URL.Query().Get("album_id")
 				AcceptAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
-			case "/notifications/friend":
-				friendID := r.URL.Query().Get("friend_id")
-				AcceptFriendRequest(ctx, w, connPool, friendID, claims.RegisteredClaims.Subject)
 			}
 		}
 
 	})
 }
 
-// ------------------------------------------------------------------------------------------------------------------------------
-// Look up notifications
 func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
 	var notifications m.Notification
 
@@ -220,26 +212,6 @@ func AcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 }
 
-func AcceptFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
-	query := `
-			INSERT INTO friends (user1_id, user2_id)
-			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
-	`
-	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
-	if err != nil {
-		fmt.Fprintf(w, "Error trying to insert friend to friends list: %v", err)
-		return err
-	}
-
-	err = DeleteFriendRequest(ctx, w, connPool, friendID, uid)
-	if err != nil {
-		return err
-	}
-
-	return nil
-
-}
-
 func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
 	query := `
 			DELETE FROM album_requests
@@ -248,20 +220,6 @@ func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.
 	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove album request: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-func DeleteFriendRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, friendID string, uid string) error {
-	query := `
-			DELETE FROM friend_requests
-			WHERE sender_id = $1 AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
-
-	_, err := connPool.Pool.Exec(ctx, query, friendID, uid)
-	if err != nil {
-		fmt.Fprintf(w, "Error trying to remove friend request: %v", err)
 		return err
 	}
 

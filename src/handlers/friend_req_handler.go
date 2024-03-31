@@ -24,6 +24,10 @@ func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cl
 		switch r.Method {
 		case http.MethodPost:
 			POSTFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+		case http.MethodPut:
+			PUTAcceptFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+		case http.MethodDelete:
+			DELETEDenyFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
 }
@@ -32,7 +36,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	var friendRequest m.FriendRequestNotification
 	receivingID := r.URL.Query().Get("id")
 	wsPayload := WebSocketPayload{
-		Operation: "INSERT",
+		Operation: "REQUEST",
 		Type:      "friend-request",
 		UserID:    receivingID,
 	}
@@ -77,6 +81,68 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	//Respond to the calling user that the action was successful
 	responseBytes, err := json.MarshalIndent("friend request sent - success", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
+func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
+	sendersID := r.URL.Query().Get("id")
+	//wsPayload := WebSocketPayload{
+	//	Operation: "ACCEPT",
+	//	Type:      "friend-request",
+	//	UserID:    sendersID,
+	//}
+
+	removeReqFromTable := `DELETE FROM friend_requests 
+       						WHERE sender_id = $1 
+       							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
+	addFriendshipQuery := `
+			INSERT INTO friends (user1_id, user2_id)
+			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
+
+	// Remove from Friend Request Table
+	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, usersID)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to remove request: %v", err)
+		return
+	}
+
+	_, err = connPool.Pool.Exec(ctx, addFriendshipQuery, sendersID, usersID)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to insert friend to friends list: %v", err)
+		return
+	}
+
+	//Respond to the calling user that the action was successful
+	responseBytes, err := json.MarshalIndent("friend request accepted", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
+func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
+	sendersID := r.URL.Query().Get("id")
+
+	removeReqFromTable := `DELETE FROM friend_requests 
+       						WHERE sender_id = $1 
+       							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
+	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, usersID)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to remove request: %v", err)
+		return
+	}
+
+	//Respond to the calling user that the action was successful
+	responseBytes, err := json.MarshalIndent("friend request denied", "", "\t")
 	if err != nil {
 		log.Panic(err)
 		return

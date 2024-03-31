@@ -93,10 +93,9 @@ func main() {
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                              // Protected
 	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                       // Protected
 	r.Handle("/user/friend", jwtMiddleware(h.FriendEndpointHandler(ctx, connPool, rdb))).Methods("GET", "DELETE")                   // Protected
-	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("GET", "POST")                   // Protected
+	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE")         // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET")                    // Protected
 	r.Handle("/notifications/album", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("POST", "DELETE")   // Protected
-	r.Handle("/notifications/friend", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("POST", "DELETE")  // Protected
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
