@@ -31,8 +31,6 @@ type WebSocketPayload struct {
 	Payload   interface{} `json:"payload"`
 }
 
-//ar uid = "69ac1008-60f8-4518-8039-e332c9265115"
-
 func WebSocketEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
@@ -82,7 +80,7 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 		for message := range notificationChannel {
 			err := sendWebSocketNotification(conn, message, uid)
 			if err != nil {
-				log.Print(err)
+				log.Printf("ListenAndWriteError: %v", err)
 				return
 			}
 		}
@@ -96,18 +94,13 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn) {
 
 	for {
-		messageType, _, err := conn.ReadMessage()
+		_, _, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err) {
 				log.Printf("error: %v", err)
 				connectionState.Active = false
 				return
 			}
-		}
-
-		if messageType == 1000 {
-			connectionState.Active = false
-			return
 		}
 	}
 }
@@ -123,7 +116,7 @@ func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid
 	if wsPayload.UserID == uid {
 		err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
 		if err != nil {
-			log.Print(err)
+			log.Printf("sendWebSocketNotification: %v", err)
 			return err
 		}
 	}
