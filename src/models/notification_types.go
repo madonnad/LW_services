@@ -31,10 +31,12 @@ type AlbumRequestNotification struct {
 }
 
 type FriendRequestNotification struct {
-	ReceivedAt time.Time `json:"received_at"`
-	UserID     string    `json:"user_id"`
-	FirstName  string    `json:"first_name"`
-	LastName   string    `json:"last_name"`
+	ReceivedAt  time.Time `json:"received_at"`
+	UserID      string    `json:"user_id"`
+	FirstName   string    `json:"first_name"`
+	LastName    string    `json:"last_name"`
+	Status      string    `json:"status"`
+	RequestSeen string    `json:"request_seen"`
 }
 
 type SummaryNotification struct {

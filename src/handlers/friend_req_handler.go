@@ -44,7 +44,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	// Create SQL entry to add request to friend request table
 	requestQuery := `INSERT INTO friend_requests (sender_id, receiver_id) 
 					 VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)
-					 RETURNING requested_at`
+					 RETURNING updated_at`
 	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
 	batch := &pgx.Batch{}
@@ -99,9 +99,10 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		UserID:    requestersID,
 	}
 
-	removeReqFromTable := `DELETE FROM friend_requests 
-       						WHERE sender_id = $1 
-       							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
+	updateReqToAccepted := `UPDATE friend_requests
+							SET status = 'accepted', updated_at = (now() AT TIME ZONE 'utc'::text)
+							WHERE sender_id = $1 
+							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
 
 	addFriendshipQuery := `INSERT INTO friends (user1_id, user2_id)
 							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
@@ -110,7 +111,7 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
 	// Remove from Friend Request Table
-	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, requestersID, usersID)
+	_, err := connPool.Pool.Exec(ctx, updateReqToAccepted, requestersID, usersID)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
@@ -152,13 +153,24 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	w.Write(responseBytes)
 }
 
-func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
+func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersAuthZeroID string) {
 	sendersID := r.URL.Query().Get("id")
+	var userID string
+
+	userIDQuery := `SELECT user_id FROM users WHERE auth_zero_id=$1`
+	err := connPool.Pool.QueryRow(ctx, userIDQuery, usersAuthZeroID).Scan(&userID)
+	if err != nil {
+		// handle error
+		fmt.Fprintf(w, "Error trying to fetch user_id: %v", err)
+		return
+	}
 
 	removeReqFromTable := `DELETE FROM friend_requests 
-       						WHERE sender_id = $1 
-       							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
-	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, usersID)
+       						WHERE 
+       						    sender_id = $1 AND receiver_id = $2
+       						OR 
+       						    sender_id = $2 AND receiver_id = $1`
+	_, err = connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, userID)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
