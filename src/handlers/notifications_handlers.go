@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
@@ -102,22 +103,49 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.FriendRequestNotification, error) {
 	var friendRequests []m.FriendRequestNotification
-	friendRequestQuery := `
-						SELECT fr.sender_id, u.first_name, u.last_name, fr.requested_at
-						FROM users u
-						JOIN friend_requests fr ON fr.sender_id = u.user_id
-						WHERE fr.receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1);`
+	batch := &pgx.Batch{}
+	pendingFriendRequests := `SELECT fr.sender_id, u.first_name, u.last_name, fr.updated_at, fr.status
+								FROM users u
+								JOIN friend_requests fr ON fr.sender_id = u.user_id
+								WHERE fr.receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+								AND fr.status = 'pending'`
+	acceptedFriendRequests := `SELECT fr.receiver_id, u.first_name, u.last_name, fr.updated_at, fr.status
+								FROM users u 
+								JOIN friend_requests fr ON fr.receiver_id = u.user_id
+								WHERE fr.sender_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+								AND fr.status = 'accepted'`
 
-	rows, err := connPool.Pool.Query(ctx, friendRequestQuery, uid)
+	batch.Queue(pendingFriendRequests, uid)
+	batch.Queue(acceptedFriendRequests, uid)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	pendingRows, err := batchResults.Query()
 	if err != nil {
-		fmt.Fprintf(w, "Failed to get query DB: %v", err)
+		fmt.Fprintf(w, "Failed to get pending friend requests: %v", err)
 		return nil, err
 	}
 
-	for rows.Next() {
+	for pendingRows.Next() {
 		var request m.FriendRequestNotification
 
-		err := rows.Scan(&request.UserID, &request.FirstName, &request.LastName, &request.ReceivedAt)
+		err := pendingRows.Scan(&request.UserID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
+			return nil, err
+		}
+		friendRequests = append(friendRequests, request)
+	}
+
+	acceptedRows, err := batchResults.Query()
+	if err != nil {
+		fmt.Fprintf(w, "Failed to get accepted friend requests: %v", err)
+		return nil, err
+	}
+
+	for acceptedRows.Next() {
+		var request m.FriendRequestNotification
+
+		err := acceptedRows.Scan(&request.UserID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
