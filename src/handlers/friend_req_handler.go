@@ -91,31 +91,54 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 }
 
 func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
-	sendersID := r.URL.Query().Get("id")
-	//wsPayload := WebSocketPayload{
-	//	Operation: "ACCEPT",
-	//	Type:      "friend-request",
-	//	UserID:    sendersID,
-	//}
+	var friendRequest m.FriendRequestNotification
+	requestersID := r.URL.Query().Get("id")
+	wsPayload := WebSocketPayload{
+		Operation: "ACCEPTED",
+		Type:      "friend-request",
+		UserID:    requestersID,
+	}
 
 	removeReqFromTable := `DELETE FROM friend_requests 
        						WHERE sender_id = $1 
        							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
-	addFriendshipQuery := `
-			INSERT INTO friends (user1_id, user2_id)
-			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
+
+	addFriendshipQuery := `INSERT INTO friends (user1_id, user2_id)
+							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
+							RETURNING friends_since`
+
+	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
 	// Remove from Friend Request Table
-	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, usersID)
+	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, requestersID, usersID)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
 	}
 
-	_, err = connPool.Pool.Exec(ctx, addFriendshipQuery, sendersID, usersID)
+	err = connPool.Pool.QueryRow(ctx, addFriendshipQuery, requestersID, usersID).Scan(&friendRequest.ReceivedAt)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to insert friend to friends list: %v", err)
 		return
+	}
+
+	err = connPool.Pool.QueryRow(ctx, senderInfoQuery, usersID).Scan(&friendRequest.UserID, &friendRequest.FirstName, &friendRequest.LastName)
+	if err != nil {
+		fmt.Fprintf(w, "Unable to lookup requesting user: %v", err)
+		return
+	}
+
+	wsPayload.Payload = friendRequest
+
+	// If successfully added to friend_request table then publish the change to redis
+	jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+	if err != nil {
+		log.Print(err)
+	}
+
+	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
 	}
 
 	//Respond to the calling user that the action was successful
