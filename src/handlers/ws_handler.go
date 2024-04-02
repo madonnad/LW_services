@@ -62,45 +62,56 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 	var newConnection = ConnectionState{Conn: conn, Active: true}
 
 	log.Print("Listening via WebSocket...")
-	go newConnection.ListenAndWrite(ctx, conn, rdb, uid)
-	go newConnection.CheckConnectionStatus(ctx, conn)
+
+	quit := make(chan int)
+	go newConnection.ListenAndWrite(ctx, conn, rdb, uid, quit)
+	go newConnection.CheckConnectionStatus(ctx, conn, quit)
 
 }
 
-func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string) {
-	//queryTime := time.Now().UTC()
-	//updatedTime := queryTime
+func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string, quit chan int) {
 
 	for connectionState.Active == true {
 
 		pubSub := rdb.Subscribe(ctx, "notifications")
 		notificationChannel := pubSub.Channel()
 
-		// Handle All Notifications to WebSocket Notification
-		for message := range notificationChannel {
+		select {
+		case message := <-notificationChannel:
 			err := sendWebSocketNotification(conn, message, uid)
 			if err != nil {
 				log.Printf("ListenAndWriteError: %v", err)
 				return
 			}
+		case <-quit:
+			connectionState.Active = false
 		}
-
 	}
+
 	log.Print("The websocket is closing..")
-	conn.Close()
+	err := conn.Close()
+	if err != nil {
+		log.Printf("Error closing websocket: %v", err)
+		return
+	}
 	return
 }
 
-func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn) {
+func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn, quit chan int) {
 
 	for {
-		_, _, err := conn.ReadMessage()
+		message, _, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err) {
 				log.Printf("error: %v", err)
-				connectionState.Active = false
+				quit <- 0
 				return
 			}
+		}
+		if message == 1000 {
+			quit <- 0
+			log.Printf("Closing: %v", message)
+			return
 		}
 	}
 }
@@ -112,7 +123,6 @@ func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid
 		return err
 	}
 
-	// TODO: May need to look into moving this higher up the function - it may get busy if every user has to check this
 	if wsPayload.UserID == uid {
 		err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
 		if err != nil {
