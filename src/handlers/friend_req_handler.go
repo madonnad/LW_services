@@ -27,39 +27,41 @@ func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cl
 		case http.MethodPut:
 			PUTAcceptFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		case http.MethodDelete:
-			DELETEDenyFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+			DELETEDenyFriendRequest(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+		case http.MethodPatch:
+			PATCHFriendRequestSeen(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 		}
 	})
 }
 
 func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, senderID string) {
 	var friendRequest m.FriendRequestNotification
-	receivingID := r.URL.Query().Get("id")
+	friendRequest.ReceiverID = r.URL.Query().Get("id")
 	wsPayload := WebSocketPayload{
 		Operation: "REQUEST",
 		Type:      "friend-request",
-		UserID:    receivingID,
+		UserID:    friendRequest.ReceiverID,
 	}
 
 	// Create SQL entry to add request to friend request table
 	requestQuery := `INSERT INTO friend_requests (sender_id, receiver_id) 
 					 VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)
-					 RETURNING updated_at`
+					 RETURNING request_id, updated_at`
 	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
 	batch := &pgx.Batch{}
-	batch.Queue(requestQuery, senderID, receivingID)
+	batch.Queue(requestQuery, senderID, friendRequest.ReceiverID)
 	batch.Queue(senderInfoQuery, senderID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
-	err := batchResults.QueryRow().Scan(&friendRequest.ReceivedAt)
+	err := batchResults.QueryRow().Scan(&friendRequest.RequestID, &friendRequest.ReceivedAt)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Unable to add friend request")
 		log.Printf("Unable to add friend request: %v", err)
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&friendRequest.UserID, &friendRequest.FirstName, &friendRequest.LastName)
+	err = batchResults.QueryRow().Scan(&friendRequest.SenderID, &friendRequest.FirstName, &friendRequest.LastName)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Unable to lookup requesting user")
 		log.Printf("Unable to lookup requesting user: %v", err)
@@ -92,17 +94,18 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
 	var friendRequest m.FriendRequestNotification
-	requestersID := r.URL.Query().Get("id")
+	friendRequest.SenderID = r.URL.Query().Get("id")
+	requestId := r.URL.Query().Get("request_id")
 	wsPayload := WebSocketPayload{
 		Operation: "ACCEPTED",
 		Type:      "friend-request",
-		UserID:    requestersID,
+		UserID:    friendRequest.SenderID,
 	}
 
 	updateReqToAccepted := `UPDATE friend_requests
-							SET status = 'accepted', updated_at = (now() AT TIME ZONE 'utc'::text)
-							WHERE sender_id = $1 
-							AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
+							SET status = 'accepted', updated_at = (now() AT TIME ZONE 'utc'::text), seen = true
+							WHERE request_id = $1
+							RETURNING status, seen`
 
 	addFriendshipQuery := `INSERT INTO friends (user1_id, user2_id)
 							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
@@ -110,20 +113,20 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 
 	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
-	// Remove from Friend Request Table
-	_, err := connPool.Pool.Exec(ctx, updateReqToAccepted, requestersID, usersID)
+	// Update Entry in Friend Request Table
+	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestId).Scan(&friendRequest.Status, &friendRequest.RequestSeen)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
 	}
 
-	err = connPool.Pool.QueryRow(ctx, addFriendshipQuery, requestersID, usersID).Scan(&friendRequest.ReceivedAt)
+	err = connPool.Pool.QueryRow(ctx, addFriendshipQuery, friendRequest.SenderID, usersID).Scan(&friendRequest.ReceivedAt)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to insert friend to friends list: %v", err)
 		return
 	}
 
-	err = connPool.Pool.QueryRow(ctx, senderInfoQuery, usersID).Scan(&friendRequest.UserID, &friendRequest.FirstName, &friendRequest.LastName)
+	err = connPool.Pool.QueryRow(ctx, senderInfoQuery, usersID).Scan(&friendRequest.ReceiverID, &friendRequest.FirstName, &friendRequest.LastName)
 	if err != nil {
 		fmt.Fprintf(w, "Unable to lookup requesting user: %v", err)
 		return
@@ -153,24 +156,12 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	w.Write(responseBytes)
 }
 
-func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersAuthZeroID string) {
-	sendersID := r.URL.Query().Get("id")
-	var userID string
-
-	userIDQuery := `SELECT user_id FROM users WHERE auth_zero_id=$1`
-	err := connPool.Pool.QueryRow(ctx, userIDQuery, usersAuthZeroID).Scan(&userID)
-	if err != nil {
-		// handle error
-		fmt.Fprintf(w, "Error trying to fetch user_id: %v", err)
-		return
-	}
+func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, usersAuthZeroID string) {
+	requestID := r.URL.Query().Get("id")
 
 	removeReqFromTable := `DELETE FROM friend_requests 
-       						WHERE 
-       						    sender_id = $1 AND receiver_id = $2
-       						OR 
-       						    sender_id = $2 AND receiver_id = $1`
-	_, err = connPool.Pool.Exec(ctx, removeReqFromTable, sendersID, userID)
+       						WHERE request_id = $1`
+	_, err := connPool.Pool.Exec(ctx, removeReqFromTable, requestID)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
@@ -178,6 +169,29 @@ func DELETEDenyFriendRequest(ctx context.Context, w http.ResponseWriter, r *http
 
 	//Respond to the calling user that the action was successful
 	responseBytes, err := json.MarshalIndent("friend request denied", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
+func PATCHFriendRequestSeen(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, usersAuthZeroID string) {
+	requestID := r.URL.Query().Get("id")
+
+	updateSeenStatus := `UPDATE friend_requests
+						SET seen = true
+						WHERE request_id = $1`
+
+	_, err := connPool.Pool.Exec(ctx, updateSeenStatus, requestID)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to mark friend request as seen: %v", err)
+		return
+	}
+
+	responseBytes, err := json.MarshalIndent("friend request successfully seen", "", "\t")
 	if err != nil {
 		log.Panic(err)
 		return

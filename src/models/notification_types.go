@@ -28,15 +28,18 @@ type AlbumRequestNotification struct {
 	OwnerFirst   string    `json:"owner_first"`
 	OwnerLast    string    `json:"owner_last"`
 	ReceivedAt   time.Time `json:"received_at"`
+	RequestSeen  bool      `json:"request_seen"`
 }
 
 type FriendRequestNotification struct {
+	RequestID   string    `json:"request_id"`
 	ReceivedAt  time.Time `json:"received_at"`
-	UserID      string    `json:"user_id"`
+	SenderID    string    `json:"sender_id"`
+	ReceiverID  string    `json:"receiver_id"`
 	FirstName   string    `json:"first_name"`
 	LastName    string    `json:"last_name"`
 	Status      string    `json:"status"`
-	RequestSeen string    `json:"request_seen"`
+	RequestSeen bool      `json:"request_seen"`
 }
 
 type SummaryNotification struct {
@@ -48,4 +51,5 @@ type SummaryNotification struct {
 	AlbumCoverID     string    `json:"album_cover_id"`
 	ReceivedAt       time.Time `json:"received_at"`
 	AlbumTypeTotal   int       `json:"album_type_total"`
+	RequestSeen      bool      `json:"request_seen"`
 }
