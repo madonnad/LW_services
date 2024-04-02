@@ -95,7 +95,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
 	var friendRequest m.FriendRequestNotification
 	friendRequest.SenderID = r.URL.Query().Get("id")
-	requestId := r.URL.Query().Get("request_id")
+	friendRequest.RequestID = r.URL.Query().Get("request_id")
 	wsPayload := WebSocketPayload{
 		Operation: "ACCEPTED",
 		Type:      "friend-request",
@@ -114,7 +114,7 @@ func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	senderInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
 
 	// Update Entry in Friend Request Table
-	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestId).Scan(&friendRequest.Status, &friendRequest.RequestSeen)
+	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, friendRequest.RequestID).Scan(&friendRequest.Status, &friendRequest.RequestSeen)
 	if err != nil {
 		fmt.Fprintf(w, "Error trying to remove request: %v", err)
 		return
