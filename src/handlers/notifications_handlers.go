@@ -76,7 +76,7 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequests []m.AlbumRequestNotification
 	albumRequestQuery := `
-						SELECT ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name, u.last_name, ar.invited_at
+						SELECT ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name, u.last_name, ar.invited_at, ar.invite_seen
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
 						JOIN users u ON (SELECT user_id FROM users WHERE auth_zero_id=$1)= a.album_owner;`
@@ -90,7 +90,7 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 	for rows.Next() {
 		var request m.AlbumRequestNotification
 
-		err := rows.Scan(&request.AlbumID, &request.AlbumName, &request.AlbumCoverID, &request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt)
+		err := rows.Scan(&request.AlbumID, &request.AlbumName, &request.AlbumCoverID, &request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt, &request.RequestSeen)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
@@ -104,12 +104,12 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.FriendRequestNotification, error) {
 	var friendRequests []m.FriendRequestNotification
 	batch := &pgx.Batch{}
-	pendingFriendRequests := `SELECT fr.sender_id, u.first_name, u.last_name, fr.updated_at, fr.status
+	pendingFriendRequests := `SELECT fr.request_id, fr.sender_id, fr.receiver_id, u.first_name, u.last_name, fr.updated_at, fr.status, fr.seen
 								FROM users u
 								JOIN friend_requests fr ON fr.sender_id = u.user_id
 								WHERE fr.receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
 								AND fr.status = 'pending'`
-	acceptedFriendRequests := `SELECT fr.receiver_id, u.first_name, u.last_name, fr.updated_at, fr.status
+	acceptedFriendRequests := `SELECT fr.request_id, fr.receiver_id, fr.sender_id, u.first_name, u.last_name, fr.updated_at, fr.status, fr.seen
 								FROM users u 
 								JOIN friend_requests fr ON fr.receiver_id = u.user_id
 								WHERE fr.sender_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
@@ -128,7 +128,7 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 	for pendingRows.Next() {
 		var request m.FriendRequestNotification
 
-		err := pendingRows.Scan(&request.UserID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status)
+		err := pendingRows.Scan(&request.RequestID, &request.SenderID, &request.ReceiverID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status, &request.RequestSeen)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
@@ -145,7 +145,7 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 	for acceptedRows.Next() {
 		var request m.FriendRequestNotification
 
-		err := acceptedRows.Scan(&request.UserID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status)
+		err := acceptedRows.Scan(&request.RequestID, &request.ReceiverID, &request.SenderID, &request.FirstName, &request.LastName, &request.ReceivedAt, &request.Status, &request.RequestSeen)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
