@@ -21,6 +21,7 @@ type GenericNotification struct {
 }
 
 type AlbumRequestNotification struct {
+	RequestID    string    `json:"request_id"`
 	AlbumID      string    `json:"album_id"`
 	AlbumName    string    `json:"album_name"`
 	AlbumCoverID string    `json:"album_cover_id"`
@@ -28,7 +29,19 @@ type AlbumRequestNotification struct {
 	OwnerFirst   string    `json:"owner_first"`
 	OwnerLast    string    `json:"owner_last"`
 	ReceivedAt   time.Time `json:"received_at"`
+	Status       string    `json:"status"`
 	RequestSeen  bool      `json:"request_seen"`
+}
+
+type AlbumRequestResponse struct {
+	AlbumID      string    `json:"album_id"`
+	AlbumName    string    `json:"album_name"`
+	AlbumCoverID string    `json:"album_cover_id"`
+	ReceiverID   string    `json:"receiver_id"`
+	FirstName    string    `json:"first_name"`
+	LastName     string    `json:"last_name"`
+	Accepted     bool      `json:"accepted"`
+	ReceivedAt   time.Time `json:"received_at"`
 }
 
 type FriendRequestNotification struct {
