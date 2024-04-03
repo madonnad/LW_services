@@ -26,18 +26,6 @@ func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *
 		switch r.Method {
 		case http.MethodGet:
 			GETExistingNotifications(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
-		case http.MethodDelete:
-			switch r.URL.Path {
-			case "/notifications/album":
-				albumID := r.URL.Query().Get("album_id")
-				DeleteAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
-			}
-		case http.MethodPost:
-			switch r.URL.Path {
-			case "/notifications/album":
-				albumID := r.URL.Query().Get("album_id")
-				AcceptAlbumRequest(ctx, w, connPool, albumID, claims.RegisteredClaims.Subject)
-			}
 		}
 
 	})
@@ -73,6 +61,7 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 
 }
 
+// QueryAlbumRequests TODO: Reimplement this to include the status
 func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequests []m.AlbumRequestNotification
 	albumRequestQuery := `
@@ -214,42 +203,5 @@ func lookupSummaryByAlbumAndType(slice []m.SummaryNotification, id string, notif
 			return &item
 		}
 	}
-	return nil
-}
-
-// ------------------------------------------------------------------------------------------------------------------------------
-// Update/Delete Notifications from Tables
-
-func AcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
-	query := `
-			INSERT INTO albumuser (album_id, user_id)
-			VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))
-	`
-	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
-	if err != nil {
-		fmt.Fprintf(w, "Error trying to insert album to albumuser list: %v", err)
-		return err
-	}
-
-	err = DeleteAlbumRequest(ctx, w, connPool, albumID, uid)
-	if err != nil {
-		return err
-	}
-
-	return nil
-
-}
-
-func DeleteAlbumRequest(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, albumID string, uid string) error {
-	query := `
-			DELETE FROM album_requests
-			WHERE album_id = $1 AND invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$2)`
-
-	_, err := connPool.Pool.Exec(ctx, query, albumID, uid)
-	if err != nil {
-		fmt.Fprintf(w, "Error trying to remove album request: %v", err)
-		return err
-	}
-
 	return nil
 }
