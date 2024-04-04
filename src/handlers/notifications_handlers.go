@@ -40,6 +40,7 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 	upvotedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "upvote")
 	friendRequests, _ := QueryFriendRequests(ctx, w, connPool, uid)
 	albumRequests, _ := QueryAlbumRequests(ctx, w, connPool, uid)
+	albumRequestsResponses, _ := QueryAlbumRequestResponses(ctx, w, connPool, uid)
 
 	for _, item := range likedSummary {
 		notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
@@ -49,6 +50,7 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	notifications.FriendRequests = friendRequests
 	notifications.AlbumRequests = albumRequests
+	notifications.AlbumRequestResponses = albumRequestsResponses
 
 	responseBytes, err := json.MarshalIndent(notifications, "", "\t")
 	if err != nil {
@@ -61,16 +63,19 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 
 }
 
-// QueryAlbumRequests TODO: Reimplement this to include the status
 func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequests []m.AlbumRequestNotification
-	albumRequestQuery := `
-						SELECT ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name, u.last_name, ar.invited_at, ar.invite_seen
+
+	queryPendingAlbumInvites := `
+						SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name,
+						       		u.last_name, ar.updated_at, ar.invite_seen, ar.status
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
-						JOIN users u ON (SELECT user_id FROM users WHERE auth_zero_id=$1)= a.album_owner;`
+						JOIN users u ON u.user_id = a.album_owner
+						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+						AND ar.status = 'pending'`
 
-	rows, err := connPool.Pool.Query(ctx, albumRequestQuery, uid)
+	rows, err := connPool.Pool.Query(ctx, queryPendingAlbumInvites, uid)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to get query DB: %v", err)
 		return nil, err
@@ -79,7 +84,9 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 	for rows.Next() {
 		var request m.AlbumRequestNotification
 
-		err := rows.Scan(&request.AlbumID, &request.AlbumName, &request.AlbumCoverID, &request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt, &request.RequestSeen)
+		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
+			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt,
+			&request.RequestSeen, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
@@ -88,6 +95,38 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 		albumRequests = append(albumRequests, request)
 	}
 	return albumRequests, nil
+}
+
+func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
+	var albumRequestResponses []m.AlbumRequestNotification
+	querySentAlbumInviteResponses := `SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, u.user_id, 
+       										u.first_name, u.last_name, ar.updated_at, ar.invite_seen, ar.status
+									FROM album_requests ar
+									JOIN albums a ON a.album_id = ar.album_id
+									JOIN users u ON ar.invited_id
+									WHERE a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+									AND ar.status != 'pending'`
+
+	rows, err := connPool.Pool.Query(ctx, querySentAlbumInviteResponses, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Failed to get query DB: %v", err)
+		return nil, err
+	}
+
+	for rows.Next() {
+		var request m.AlbumRequestNotification
+
+		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
+			&request.ReceiverID, &request.ReceiverFirst, &request.ReceiverLast, &request.ReceivedAt,
+			&request.RequestSeen, &request.Status)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
+			return nil, err
+		}
+
+		albumRequestResponses = append(albumRequestResponses, request)
+	}
+	return albumRequestResponses, nil
 }
 
 func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.FriendRequestNotification, error) {

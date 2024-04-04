@@ -3,9 +3,10 @@ package models
 import "time"
 
 type Notification struct {
-	SummaryNotifications []SummaryNotification       `json:"summary_notifications"`
-	AlbumRequests        []AlbumRequestNotification  `json:"album_invites"`
-	FriendRequests       []FriendRequestNotification `json:"friend_requests"`
+	SummaryNotifications  []SummaryNotification       `json:"summary_notifications"`
+	AlbumRequests         []AlbumRequestNotification  `json:"album_invites"`
+	FriendRequests        []FriendRequestNotification `json:"friend_requests"`
+	AlbumRequestResponses []AlbumRequestNotification  `json:"album_request_responses"`
 }
 
 type GenericNotification struct {
@@ -21,27 +22,19 @@ type GenericNotification struct {
 }
 
 type AlbumRequestNotification struct {
-	RequestID    string    `json:"request_id"`
-	AlbumID      string    `json:"album_id"`
-	AlbumName    string    `json:"album_name"`
-	AlbumCoverID string    `json:"album_cover_id"`
-	AlbumOwner   string    `json:"album_owner"`
-	OwnerFirst   string    `json:"owner_first"`
-	OwnerLast    string    `json:"owner_last"`
-	ReceivedAt   time.Time `json:"received_at"`
-	Status       string    `json:"status"`
-	RequestSeen  bool      `json:"request_seen"`
-}
-
-type AlbumRequestResponse struct {
-	AlbumID      string    `json:"album_id"`
-	AlbumName    string    `json:"album_name"`
-	AlbumCoverID string    `json:"album_cover_id"`
-	ReceiverID   string    `json:"receiver_id"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	Accepted     bool      `json:"accepted"`
-	ReceivedAt   time.Time `json:"received_at"`
+	RequestID     string    `json:"request_id"`
+	AlbumID       string    `json:"album_id"`
+	AlbumName     string    `json:"album_name"`
+	AlbumCoverID  string    `json:"album_cover_id"`
+	AlbumOwner    string    `json:"album_owner"`
+	OwnerFirst    string    `json:"owner_first"`
+	OwnerLast     string    `json:"owner_last"`
+	ReceiverID    string    `json:"receiver_id"`
+	ReceiverFirst string    `json:"receiver_first"`
+	ReceiverLast  string    `json:"receiver_last"`
+	Status        string    `json:"status"`
+	RequestSeen   bool      `json:"request_seen"`
+	ReceivedAt    time.Time `json:"received_at"`
 }
 
 type FriendRequestNotification struct {
