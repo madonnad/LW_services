@@ -31,8 +31,8 @@ func AlbumRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cli
 }
 
 func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
-	response := m.AlbumRequestResponse{
-		Accepted: true,
+	response := m.AlbumRequestNotification{
+		Status: `accepted`,
 	}
 
 	wsPayload := WebSocketPayload{
@@ -69,7 +69,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	batch.Queue(albumInfoQuery, response.AlbumID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
-	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.FirstName, &response.LastName)
+	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.ReceiverFirst, &response.ReceiverLast)
 	if err != nil {
 		log.Print(err)
 	}
@@ -104,8 +104,8 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 }
 
 func DeleteDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
-	response := m.AlbumRequestResponse{
-		Accepted: false,
+	response := m.AlbumRequestNotification{
+		Status: `denied`,
 	}
 	wsPayload := WebSocketPayload{
 		Operation: "DENIED",
@@ -139,7 +139,7 @@ func DeleteDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.FirstName, &response.LastName)
+	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.ReceiverFirst, &response.ReceiverLast)
 	if err != nil {
 		log.Print(err)
 		return
