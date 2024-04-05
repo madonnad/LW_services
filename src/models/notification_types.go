@@ -35,6 +35,7 @@ type AlbumRequestNotification struct {
 	Status        string    `json:"status"`
 	RequestSeen   bool      `json:"request_seen"`
 	ReceivedAt    time.Time `json:"received_at"`
+	UnlockedAt    time.Time `json:"unlocked_at"`
 }
 
 type FriendRequestNotification struct {
