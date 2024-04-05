@@ -68,12 +68,12 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 	queryPendingAlbumInvites := `
 						SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name,
-						       		u.last_name, ar.updated_at, ar.invite_seen, ar.status
+						       		u.last_name, ar.updated_at, a.unlocked_at, ar.invite_seen, ar.status
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
 						JOIN users u ON u.user_id = a.album_owner
 						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-						AND ar.status = 'pending'`
+						AND (ar.status = 'pending' OR ar.status ='accepted')`
 
 	rows, err := connPool.Pool.Query(ctx, queryPendingAlbumInvites, uid)
 	if err != nil {
@@ -85,10 +85,10 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 		var request m.AlbumRequestNotification
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
-			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt,
+			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt, &request.UnlockedAt,
 			&request.RequestSeen, &request.Status)
 		if err != nil {
-			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
+			fmt.Fprintf(w, "Failed to insert data to object AlbumInvites: %v", err)
 			return nil, err
 		}
 
@@ -103,13 +103,13 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
        										u.first_name, u.last_name, ar.updated_at, ar.invite_seen, ar.status
 									FROM album_requests ar
 									JOIN albums a ON a.album_id = ar.album_id
-									JOIN users u ON ar.invited_id
+									JOIN users u ON ar.invited_id = u.user_id
 									WHERE a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-									AND ar.status != 'pending'`
+									AND (ar.status = 'accepted' OR ar.status = 'denied')`
 
 	rows, err := connPool.Pool.Query(ctx, querySentAlbumInviteResponses, uid)
 	if err != nil {
-		fmt.Fprintf(w, "Failed to get query DB: %v", err)
+		fmt.Fprintf(w, "Failed to get query DB AlbumReqs: %v", err)
 		return nil, err
 	}
 

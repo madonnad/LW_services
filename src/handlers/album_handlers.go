@@ -26,6 +26,8 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			switch r.URL.Path {
 			case "/user/album":
 				GETAlbumsByUserID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
+			case "/album":
+				GetAlbumByAlbumID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
 			case "/album/revealed":
 				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
 			}
@@ -34,6 +36,10 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
+}
+
+func GetAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
+
 }
 
 func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
@@ -48,24 +54,24 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 	}
 
 	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
-								  FROM albums a
-								  JOIN albumuser au
-								  ON au.album_id=a.album_id
-								  JOIN users u
-								  ON a.album_owner=u.user_id
-								  WHERE a.album_id=$1 AND a.revealed_at < CURRENT_DATE`
+					  FROM albums a
+					  JOIN albumuser au
+					  ON au.album_id=a.album_id
+					  JOIN users u
+					  ON a.album_owner=u.user_id
+					  WHERE a.album_id=$1 AND a.revealed_at < CURRENT_DATE`
 
-	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, false as accepted
-								FROM users u
-								JOIN album_requests ar
-								ON u.user_id = ar.invited_id
-								WHERE ar.album_id = $1
-								UNION
-								SELECT u.user_id,  u.first_name, u.last_name, true as accepted
-								FROM users u
-								JOIN albumuser au
-								ON u.user_id = au.user_id
-								WHERE au.album_id = $1`
+	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
+					FROM users u
+					JOIN album_requests ar
+					ON u.user_id = ar.invited_id
+					WHERE ar.album_id = $1`
+	//UNION
+	//SELECT u.user_id,  u.first_name, u.last_name, true as accepted
+	//FROM users u
+	//JOIN albumuser au
+	//ON u.user_id = au.user_id
+	//WHERE au.album_id = $1
 
 	for _, id := range albumIDs {
 		var album m.Album
@@ -83,10 +89,18 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 			log.Print(err)
 		}
 
+		guest := m.Guest{
+			ID:        album.AlbumOwner,
+			FirstName: album.OwnerFirst,
+			LastName:  album.OwnerLast,
+			Status:    "accepted",
+		}
+		guests = append(guests, guest)
+
 		for guestResponse.Next() {
 			var guest m.Guest
 
-			err = guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Accepted)
+			err = guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
 			if err != nil {
 				log.Print(err)
 			}
@@ -126,17 +140,17 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 				   ON a.album_owner=u.user_id
 				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
-	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, false as accepted
+	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
 					FROM users u
 					JOIN album_requests ar
 					ON u.user_id = ar.invited_id
-					WHERE ar.album_id = $1
-					UNION
-					SELECT u.user_id,  u.first_name, u.last_name, true as accepted
-					FROM users u
-					JOIN albumuser au
-					ON u.user_id = au.user_id
-					WHERE au.album_id = $1`
+					WHERE ar.album_id = $1`
+	//-- 					UNION
+	//-- 					SELECT u.user_id,  u.first_name, u.last_name, true as accepted
+	//-- 					FROM users u
+	//-- 					JOIN albumuser au
+	//-- 					ON u.user_id = au.user_id
+	//-- 					WHERE au.album_id = $1`
 
 	response, err := connPool.Pool.Query(ctx, albumQuery, uid)
 	if err != nil {
@@ -161,11 +175,18 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		if err != nil {
 			log.Print(err)
 		}
+		guest := m.Guest{
+			ID:        album.AlbumOwner,
+			FirstName: album.OwnerFirst,
+			LastName:  album.OwnerLast,
+			Status:    "accepted",
+		}
+		guests = append(guests, guest)
 
 		for guestResponse.Next() {
 			var guest m.Guest
 
-			err := guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Accepted)
+			err := guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
 			if err != nil {
 				log.Print(err)
 			}

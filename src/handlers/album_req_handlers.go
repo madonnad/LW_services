@@ -52,16 +52,18 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 							RETURNING accepted_at`
 
 	acceptsInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
-	albumInfoQuery := `SELECT album_cover_id, album_name, album_owner FROM albums WHERE album_id = $1`
+	albumInfoQuery := `SELECT album_cover_id, album_name, album_owner, unlocked_at FROM albums WHERE album_id = $1`
 
 	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestID).Scan(&response.AlbumID)
 	if err != nil {
-		log.Print(err)
+		log.Printf("Update Request Error: %v", err)
+		return
 	}
 
 	err = connPool.Pool.QueryRow(ctx, addUserToAlbumUser, response.AlbumID, authZeroID).Scan(&response.ReceivedAt)
 	if err != nil {
-		log.Print(err)
+		log.Printf("Add User to AU Error: %v", err)
+		return
 	}
 
 	batch := &pgx.Batch{}
@@ -73,7 +75,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	if err != nil {
 		log.Print(err)
 	}
-	err = batchResults.QueryRow().Scan(&response.AlbumCoverID, &response.AlbumName, &wsPayload.UserID)
+	err = batchResults.QueryRow().Scan(&response.AlbumCoverID, &response.AlbumName, &wsPayload.UserID, &response.UnlockedAt)
 	if err != nil {
 		log.Print(err)
 	}
