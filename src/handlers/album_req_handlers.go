@@ -117,8 +117,9 @@ func DeleteDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 
 	// Prepare SQL statements
 	denyRequestQuery := `UPDATE album_requests 
-							SET status = 'denied', updated_at = (now() AT TIME ZONE 'utc'::text) 
-							WHERE request_id = $1 RETURNING album_id`
+							SET status = 'denied', invite_seen = true , updated_at = (now() AT TIME ZONE 'utc'::text) 
+							WHERE request_id = $1 
+							RETURNING album_id, updated_at`
 	albumOwnerIDQuery := `SELECT album_owner FROM albums WHERE album_id = $1`
 	userInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
 
