@@ -25,19 +25,19 @@ func AlbumRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cli
 		case http.MethodPut:
 			PUTAcceptAlbumRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		case http.MethodDelete:
-			DeleteDenyAlbumRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+			DELETEDenyAlbumRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
 }
 
 func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
-	response := m.AlbumRequestNotification{
+	notification := m.AlbumRequestNotification{
 		Status: `accepted`,
 	}
 
 	wsPayload := WebSocketPayload{
 		Operation: "ACCEPTED",
-		Type:      "album-request",
+		Type:      "album-invite",
 	}
 
 	requestID := r.URL.Query().Get("request_id")
@@ -48,19 +48,21 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 							RETURNING album_id`
 
 	addUserToAlbumUser := `INSERT INTO albumuser (album_id, user_id) 
-							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2)) 
-							RETURNING accepted_at`
+							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
 
 	acceptsInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
-	albumInfoQuery := `SELECT album_cover_id, album_name, album_owner, unlocked_at FROM albums WHERE album_id = $1`
+	albumInfoQuery := `SELECT album_name, album_cover_id, album_owner FROM albums WHERE album_id = $1`
+	addNotificationForOwner := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type)
+								VALUES ($1, $2, $3, $4, 'album_accepted')
+								RETURNING notification_uid, received_at, seen`
 
-	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestID).Scan(&response.AlbumID)
+	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestID).Scan(&notification.AlbumID)
 	if err != nil {
 		log.Printf("Update Request Error: %v", err)
 		return
 	}
 
-	err = connPool.Pool.QueryRow(ctx, addUserToAlbumUser, response.AlbumID, authZeroID).Scan(&response.ReceivedAt)
+	_, err = connPool.Pool.Exec(ctx, addUserToAlbumUser, notification.AlbumID, authZeroID)
 	if err != nil {
 		log.Printf("Add User to AU Error: %v", err)
 		return
@@ -68,19 +70,24 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 
 	batch := &pgx.Batch{}
 	batch.Queue(acceptsInfoQuery, authZeroID)
-	batch.Queue(albumInfoQuery, response.AlbumID)
+	batch.Queue(albumInfoQuery, notification.AlbumID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
-	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.ReceiverFirst, &response.ReceiverLast)
+	err = batchResults.QueryRow().Scan(&notification.GuestID, &notification.GuestFirst, &notification.GuestLast)
 	if err != nil {
 		log.Print(err)
 	}
-	err = batchResults.QueryRow().Scan(&response.AlbumCoverID, &response.AlbumName, &wsPayload.UserID, &response.UnlockedAt)
+	err = batchResults.QueryRow().Scan(&notification.AlbumName, &notification.AlbumCoverID, &wsPayload.UserID)
+	if err != nil {
+		log.Print(err)
+	}
+	err = connPool.Pool.QueryRow(ctx, addNotificationForOwner, notification.AlbumID, notification.AlbumCoverID,
+		notification.GuestID, wsPayload.UserID).Scan(&notification.RequestID, &notification.ReceivedAt, &notification.RequestSeen)
 	if err != nil {
 		log.Print(err)
 	}
 
-	wsPayload.Payload = response
+	wsPayload.Payload = notification
 
 	// Send payload to WebSocket
 	jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
@@ -105,7 +112,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 
 }
 
-func DeleteDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
+func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
 	response := m.AlbumRequestNotification{
 		Status: `denied`,
 	}
@@ -142,7 +149,7 @@ func DeleteDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&response.ReceiverID, &response.ReceiverFirst, &response.ReceiverLast)
+	err = batchResults.QueryRow().Scan(&response.GuestID, &response.GuestFirst, &response.GuestLast)
 	if err != nil {
 		log.Print(err)
 		return

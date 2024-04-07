@@ -95,7 +95,7 @@ func main() {
 	r.Handle("/user/friend", jwtMiddleware(h.FriendEndpointHandler(ctx, connPool, rdb))).Methods("GET", "DELETE")                    // Protected
 	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE", "PATCH") // Protected
 	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE")                     // Protected
-	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET")                     // Protected
+	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET", "PATCH")            // Protected
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)

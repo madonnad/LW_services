@@ -14,28 +14,32 @@ type GenericNotification struct {
 	MediaID          string    `json:"media_id"`
 	AlbumID          string    `json:"album_id"`
 	AlbumName        string    `json:"album_name"`
+	Caption          string    `json:"caption"` //Optional
+	Comment          string    `json:"comment"` //Optional
+	ReceiverID       string    `json:"receiver_id"`
 	NotifierID       string    `json:"notifier_id"`
-	NotifierName     string    `json:"notifier_name"`
+	NotifierFirst    string    `json:"notifier_first"`
+	NotifierLast     string    `json:"notifier_last"`
 	NotificationSeen bool      `json:"notification_seen"`
 	NotificationType string    `json:"notification_type"`
 	ReceivedAt       time.Time `json:"received_at"`
 }
 
 type AlbumRequestNotification struct {
-	RequestID     string    `json:"request_id"`
-	AlbumID       string    `json:"album_id"`
-	AlbumName     string    `json:"album_name"`
-	AlbumCoverID  string    `json:"album_cover_id"`
-	AlbumOwner    string    `json:"album_owner"`
-	OwnerFirst    string    `json:"owner_first"`
-	OwnerLast     string    `json:"owner_last"`
-	ReceiverID    string    `json:"receiver_id"`
-	ReceiverFirst string    `json:"receiver_first"`
-	ReceiverLast  string    `json:"receiver_last"`
-	Status        string    `json:"status"`
-	RequestSeen   bool      `json:"request_seen"`
-	ReceivedAt    time.Time `json:"received_at"`
-	UnlockedAt    time.Time `json:"unlocked_at"`
+	RequestID    string    `json:"request_id"`
+	AlbumID      string    `json:"album_id"`
+	AlbumName    string    `json:"album_name"`
+	AlbumCoverID string    `json:"album_cover_id"`
+	AlbumOwner   string    `json:"album_owner"`
+	OwnerFirst   string    `json:"owner_first"`
+	OwnerLast    string    `json:"owner_last"`
+	GuestID      string    `json:"guest_id"`
+	GuestFirst   string    `json:"guest_first"`
+	GuestLast    string    `json:"guest_last"`
+	Status       string    `json:"status"`
+	RequestSeen  bool      `json:"request_seen"`
+	ReceivedAt   time.Time `json:"received_at"`
+	UnlockedAt   time.Time `json:"unlocked_at"`
 }
 
 type FriendRequestNotification struct {

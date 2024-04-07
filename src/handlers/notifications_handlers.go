@@ -26,6 +26,8 @@ func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *
 		switch r.Method {
 		case http.MethodGet:
 			GETExistingNotifications(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+		case http.MethodPatch:
+			PATCHMarkNotificationSeen(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 		}
 
 	})
@@ -99,13 +101,13 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequestResponses []m.AlbumRequestNotification
-	querySentAlbumInviteResponses := `SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, u.user_id, 
-       										u.first_name, u.last_name, ar.updated_at, ar.invite_seen, ar.status
-									FROM album_requests ar
-									JOIN albums a ON a.album_id = ar.album_id
-									JOIN users u ON ar.invited_id = u.user_id
+	querySentAlbumInviteResponses := `SELECT n.notification_uid, n.album_id, a.album_name, n.media_id, n.sender_id, 
+       										u.first_name, u.last_name, n.received_at, n.seen
+									FROM notifications n
+									JOIN albums a ON a.album_id = n.album_id
+									JOIN users u ON n.sender_id = u.user_id
 									WHERE a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-									AND (ar.status = 'accepted' OR ar.status = 'denied')`
+									AND n.type = 'album_accepted'`
 
 	rows, err := connPool.Pool.Query(ctx, querySentAlbumInviteResponses, uid)
 	if err != nil {
@@ -117,8 +119,8 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
 		var request m.AlbumRequestNotification
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
-			&request.ReceiverID, &request.ReceiverFirst, &request.ReceiverLast, &request.ReceivedAt,
-			&request.RequestSeen, &request.Status)
+			&request.GuestID, &request.GuestFirst, &request.GuestLast, &request.ReceivedAt,
+			&request.RequestSeen)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
@@ -186,28 +188,27 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 
 func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string, dateString string, searchType string) ([]m.SummaryNotification, error) {
 	var summaryNotifications []m.SummaryNotification
-	genericNotificationQuery := `
-					WITH AlbumTotals AS (
-					SELECT album_id, COUNT(*) AS total
-					FROM notifications
-					WHERE notification_type = $2
-					GROUP BY album_id)
-
-					SELECT u.first_name, a.album_name, n.album_id, a.album_cover_id, n.notification_type, n.received_at, at.total
-					FROM (
-						SELECT sender_id, album_id, notification_seen, receiver_id, notification_type, received_at,
-							row_number() OVER (PARTITION BY album_id ORDER BY received_at DESC) AS recent
-						FROM notifications) AS n
-					JOIN users u
-					ON sender_id = u.user_id
-					JOIN albums a
-					ON a.album_id = n.album_id
-					JOIN AlbumTotals at
-					ON n.album_id = at.album_id
-					WHERE recent <= 2
-					AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-					AND notification_type = $2
-					AND received_at > $3`
+	genericNotificationQuery := `WITH AlbumTotals AS (
+								SELECT album_id, COUNT(*) AS total
+								FROM notifications
+								WHERE type = $2
+								GROUP BY album_id)
+								
+								SELECT u.first_name, a.album_name, n.album_id, a.album_cover_id, n.type, n.received_at, at.total
+								FROM (
+								SELECT sender_id, album_id, seen, receiver_id, type, received_at,
+									row_number() OVER (PARTITION BY album_id ORDER BY received_at DESC) AS recent
+								FROM notifications) AS n
+								JOIN users u
+								ON sender_id = u.user_id
+								JOIN albums a
+								ON a.album_id = n.album_id
+								JOIN AlbumTotals at
+								ON n.album_id = at.album_id
+								WHERE recent <= 2
+								AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+								AND type = $2
+								AND received_at > $3`
 
 	rows, err := connPool.Pool.Query(ctx, genericNotificationQuery, uid, searchType, dateString)
 	if err != nil {
@@ -243,4 +244,28 @@ func lookupSummaryByAlbumAndType(slice []m.SummaryNotification, id string, notif
 		}
 	}
 	return nil
+}
+
+func PATCHMarkNotificationSeen(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	notificationID := r.URL.Query().Get("id")
+
+	markSeenQuery := `UPDATE notifications
+						SET seen = true
+						WHERE (notification_uid = $1 
+						           AND receiver_id = (SELECT user_id FROM users WHERE auth_zero_id=$2))`
+
+	_, err := connPool.Pool.Exec(ctx, markSeenQuery, notificationID, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Error trying to mark friend request as seen: %v", err)
+		return
+	}
+
+	responseBytes, err := json.MarshalIndent("friend request successfully seen", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
 }
