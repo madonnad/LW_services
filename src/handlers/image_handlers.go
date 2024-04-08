@@ -582,32 +582,3 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, ui
 	}
 	album.Images = images
 }
-
-//likeQuery := `SELECT l.user_id, u.first_name, u.last_name
-//					FROM likes l
-//					JOIN users u ON l.user_id = u.user_id
-//					WHERE l.image_id=$1`
-
-// likedUsers := []m.User{}
-
-// Look up users who liked the image
-//likeResponse, err := connPool.Pool.Query(ctx, likeQuery, image.ID)
-//if err != nil {
-//log.Print(err)
-//}
-
-//// Scan the liked users
-//for likeResponse.Next() {
-//var user m.User
-
-//err := likeResponse.Scan(&user.ID, &user.FirstName, &user.LastName)
-//if err != nil {
-//log.Print(err)
-//}
-//likedUsers = append(likedUsers, user)
-//}
-
-//upvoteQuery := `SELECT up.user_id, u.first_name, u.last_name
-//					FROM upvotes up
-//					JOIN users u ON up.user_id = u.user_id
-//					WHERE up.image_id=$1`

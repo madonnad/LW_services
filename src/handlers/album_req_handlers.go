@@ -118,7 +118,7 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	wsPayload := WebSocketPayload{
 		Operation: "DENIED",
-		Type:      "album-request",
+		Type:      "album-invite",
 	}
 	requestID := r.URL.Query().Get("request_id")
 
