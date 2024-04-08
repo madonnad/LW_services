@@ -26,20 +26,16 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			switch r.URL.Path {
 			case "/user/album":
 				GETAlbumsByUserID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
-			case "/album":
-				GetAlbumByAlbumID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
 			case "/album/revealed":
 				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
+			case "/album/guests":
+				GETAlbumGuests(w, r, connPool, ctx)
 			}
 
 		case http.MethodPost:
 			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
-}
-
-func GetAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
-
 }
 
 func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
@@ -140,17 +136,15 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 				   ON a.album_owner=u.user_id
 				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
-	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
-					FROM users u
-					JOIN album_requests ar
-					ON u.user_id = ar.invited_id
-					WHERE ar.album_id = $1`
-	//-- 					UNION
-	//-- 					SELECT u.user_id,  u.first_name, u.last_name, true as accepted
-	//-- 					FROM users u
-	//-- 					JOIN albumuser au
-	//-- 					ON u.user_id = au.user_id
-	//-- 					WHERE au.album_id = $1`
+	guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
+					FROM albumuser au
+					JOIN users u ON u.user_id = au.user_id
+					WHERE au.album_id = $1
+					UNION
+					SELECT u.user_id, u.first_name, u.last_name, ar.status
+					FROM album_requests ar
+					JOIN users u ON u.user_id = ar.invited_id
+					WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
 
 	response, err := connPool.Pool.Query(ctx, albumQuery, uid)
 	if err != nil {
@@ -175,13 +169,13 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		if err != nil {
 			log.Print(err)
 		}
-		guest := m.Guest{
-			ID:        album.AlbumOwner,
-			FirstName: album.OwnerFirst,
-			LastName:  album.OwnerLast,
-			Status:    "accepted",
-		}
-		guests = append(guests, guest)
+		//guest := m.Guest{
+		//	ID:        album.AlbumOwner,
+		//	FirstName: album.OwnerFirst,
+		//	LastName:  album.OwnerLast,
+		//	Status:    "accepted",
+		//}
+		//guests = append(guests, guest)
 
 		for guestResponse.Next() {
 			var guest m.Guest
@@ -280,6 +274,49 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	w.Header().Set("Content-Type", "application/json") // add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func GETAlbumGuests(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
+	albumID := r.URL.Query().Get("album_id")
+	var guests []m.Guest
+
+	guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
+							FROM albumuser au
+							JOIN users u ON u.user_id = au.user_id
+							WHERE au.album_id = $1
+							UNION
+							SELECT u.user_id, u.first_name, u.last_name, ar.status
+							FROM album_requests ar
+							JOIN users u ON u.user_id = ar.invited_id
+							WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
+
+	rows, err := connPool.Pool.Query(ctx, guestQuery, albumID)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	for rows.Next() {
+		var guest m.Guest
+
+		err = rows.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
+		if err != nil {
+			log.Printf("Failed guests: %v", err)
+			return
+		}
+
+		guests = append(guests, guest)
+	}
+
+	insertResponse, err := json.MarshalIndent(guests, "", "\t")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	responseBytes := []byte(insertResponse)
+
+	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
+	w.Write(responseBytes)
+
 }
 
 func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
