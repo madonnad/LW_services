@@ -26,6 +26,8 @@ func AlbumRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cli
 			PUTAcceptAlbumRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		case http.MethodDelete:
 			DELETEDenyAlbumRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+		case http.MethodPatch:
+			PATCHMarkRequestResponseAsSeen(ctx, w, r, connPool)
 		}
 	})
 }
@@ -40,23 +42,31 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 		Type:      "album-invite",
 	}
 
-	requestID := r.URL.Query().Get("request_id")
+	var guests []m.Guest
+
+	notification.RequestID = r.URL.Query().Get("request_id")
 
 	updateReqToAccepted := `UPDATE album_requests
 							SET invite_seen = true, status = 'accepted', updated_at = (now() AT TIME ZONE 'utc'::text) 
 							WHERE request_id = $1
-							RETURNING album_id`
+							RETURNING album_id, updated_at`
 
 	addUserToAlbumUser := `INSERT INTO albumuser (album_id, user_id) 
 							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
 
 	acceptsInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
-	albumInfoQuery := `SELECT album_name, album_cover_id, album_owner FROM albums WHERE album_id = $1`
-	addNotificationForOwner := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type)
-								VALUES ($1, $2, $3, $4, 'album_accepted')
-								RETURNING notification_uid, received_at, seen`
+	albumInfoQuery := `SELECT a.album_name, a.album_cover_id, a.unlocked_at ,a.album_owner, u.first_name, u.last_name
+						FROM albums a
+						JOIN users u
+						ON u.user_id = a.album_owner
+						WHERE album_id = $1`
+	//addNotificationForOwner := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type)
+	//							VALUES ($1, $2, $3, $4, 'album_accepted')
+	//							RETURNING notification_uid, received_at, seen`
+	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
+                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
 
-	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, requestID).Scan(&notification.AlbumID)
+	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, notification.RequestID).Scan(&notification.AlbumID, &notification.ReceivedAt)
 	if err != nil {
 		log.Printf("Update Request Error: %v", err)
 		return
@@ -71,33 +81,54 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	batch := &pgx.Batch{}
 	batch.Queue(acceptsInfoQuery, authZeroID)
 	batch.Queue(albumInfoQuery, notification.AlbumID)
+	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
 	err = batchResults.QueryRow().Scan(&notification.GuestID, &notification.GuestFirst, &notification.GuestLast)
 	if err != nil {
 		log.Print(err)
 	}
-	err = batchResults.QueryRow().Scan(&notification.AlbumName, &notification.AlbumCoverID, &wsPayload.UserID)
+	err = batchResults.QueryRow().Scan(&notification.AlbumName, &notification.AlbumCoverID, &notification.UnlockedAt,
+		&notification.AlbumOwner, &notification.OwnerFirst, &notification.OwnerLast)
 	if err != nil {
 		log.Print(err)
 	}
-	err = connPool.Pool.QueryRow(ctx, addNotificationForOwner, notification.AlbumID, notification.AlbumCoverID,
-		notification.GuestID, wsPayload.UserID).Scan(&notification.RequestID, &notification.ReceivedAt, &notification.RequestSeen)
+	//err = connPool.Pool.QueryRow(ctx, addNotificationForOwner, notification.AlbumID, notification.AlbumCoverID,
+	//	notification.GuestID, wsPayload.UserID).Scan(&notification.RequestID, &notification.ReceivedAt, &notification.InviteSeen)
+	//if err != nil {
+	//	log.Print(err)
+	//}
+	rows, err := batchResults.Query()
 	if err != nil {
 		log.Print(err)
+	}
+	for rows.Next() {
+		var guest m.Guest
+
+		err = rows.Scan(&guest.ID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		guests = append(guests, guest)
 	}
 
 	wsPayload.Payload = notification
 
-	// Send payload to WebSocket
-	jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
-	if err != nil {
-		log.Print(err)
-	}
+	for _, guest := range guests {
+		wsPayload.UserID = guest.ID
 
-	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
-	if err != nil {
-		log.Print(err)
+		// Send payload to WebSocket
+		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+		if err != nil {
+			log.Print(err)
+		}
+
+		err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+		if err != nil {
+			log.Print(err)
+		}
+
 	}
 
 	//Respond to the calling user that the action was successful
@@ -113,7 +144,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 }
 
 func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, authZeroID string) {
-	response := m.AlbumRequestNotification{
+	notification := m.AlbumRequestNotification{
 		Status: `denied`,
 	}
 	wsPayload := WebSocketPayload{
@@ -121,17 +152,20 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		Type:      "album-invite",
 	}
 	requestID := r.URL.Query().Get("request_id")
+	var guests []m.Guest
 
 	// Prepare SQL statements
 	denyRequestQuery := `UPDATE album_requests 
-							SET status = 'denied', invite_seen = true , updated_at = (now() AT TIME ZONE 'utc'::text) 
+							SET status = 'denied', invite_seen = true, response_seen = true, updated_at = (now() AT TIME ZONE 'utc'::text)
 							WHERE request_id = $1 
 							RETURNING album_id, updated_at`
 	albumOwnerIDQuery := `SELECT album_owner FROM albums WHERE album_id = $1`
 	userInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
+	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
+                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
 
-	// Execute the delete outside of the batch since the albumOwnerIDQuery is reliant on the response of this request
-	err := connPool.Pool.QueryRow(ctx, denyRequestQuery, requestID).Scan(&response.AlbumID, &response.ReceivedAt)
+	// Execute the delete outside of the batch since the albumOwnerIDQuery is reliant on the notification of this request
+	err := connPool.Pool.QueryRow(ctx, denyRequestQuery, requestID).Scan(&notification.AlbumID, &notification.ReceivedAt)
 	if err != nil {
 		log.Print(err)
 		return
@@ -139,8 +173,9 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 
 	// Batch remaining queries
 	batch := &pgx.Batch{}
-	batch.Queue(albumOwnerIDQuery, &response.AlbumID)
+	batch.Queue(albumOwnerIDQuery, &notification.AlbumID)
 	batch.Queue(userInfoQuery, authZeroID)
+	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
 	err = batchResults.QueryRow().Scan(&wsPayload.UserID)
@@ -149,28 +184,75 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&response.GuestID, &response.GuestFirst, &response.GuestLast)
+	err = batchResults.QueryRow().Scan(&notification.GuestID, &notification.GuestFirst, &notification.GuestLast)
 	if err != nil {
 		log.Print(err)
 		return
 	}
 
-	// Add the response struct to the wsPayload
-	wsPayload.Payload = response
-
-	// Send payload to WebSocket
-	jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+	rows, err := batchResults.Query()
 	if err != nil {
 		log.Print(err)
 	}
 
-	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
-	if err != nil {
-		log.Print(err)
+	for rows.Next() {
+		var guest m.Guest
+
+		err = rows.Scan(&guest.ID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		guests = append(guests, guest)
+	}
+
+	// Add the notification struct to the wsPayload
+	wsPayload.Payload = notification
+
+	// Send payload to WebSocket
+	for _, guest := range guests {
+		wsPayload.UserID = guest.ID
+
+		// Send payload to WebSocket
+		jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+		if err != nil {
+			log.Print(err)
+		}
+
+		err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+		if err != nil {
+			log.Print(err)
+		}
+
 	}
 
 	//Respond to the calling user that the action was successful
 	responseBytes, err := json.MarshalIndent("album invite denied - success", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
+func PATCHMarkRequestResponseAsSeen(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	requestID := r.URL.Query().Get("id")
+
+	markSeenQuery := `UPDATE album_requests
+						SET response_seen = true, updated_at = (now() AT TIME ZONE 'utc'::text)
+						WHERE request_id = $1`
+	_, err := connPool.Pool.Exec(ctx, markSeenQuery, requestID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		responseBytes, _ := json.MarshalIndent("marking album request response as seen failed", "", "\t")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(responseBytes)
+	}
+
+	responseBytes, err := json.MarshalIndent("album request response seen - success", "", "\t")
 	if err != nil {
 		log.Panic(err)
 		return

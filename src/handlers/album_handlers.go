@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5"
 	"io"
 	m "last_weekend_services/src/models"
 	"log"
@@ -26,6 +27,8 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			switch r.URL.Path {
 			case "/user/album":
 				GETAlbumsByUserID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
+			case "/album":
+				GETAlbumByAlbumID(w, r, connPool, ctx, claims.RegisteredClaims.Subject)
 			case "/album/revealed":
 				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
 			case "/album/guests":
@@ -36,6 +39,69 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 		}
 	})
+}
+
+func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context, authZeroID string) {
+	var album m.Album
+	var guests []m.Guest
+	batch := &pgx.Batch{}
+	albumID := r.URL.Query().Get("album_id")
+
+	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+					  FROM albums a
+					  JOIN albumuser au
+					  ON au.album_id=a.album_id
+					  JOIN users u
+					  ON a.album_owner=u.user_id
+					  WHERE a.album_id=$1`
+
+	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
+					FROM users u
+					JOIN album_requests ar
+					ON u.user_id = ar.invited_id
+					WHERE ar.album_id = $1`
+
+	batch.Queue(albumQuery, albumID)
+	batch.Queue(guestQuery, albumID)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	err := batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
+		&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	QueryImagesData(ctx, connPool, &album, authZeroID)
+	guestRows, err := batchResults.Query()
+	if err != nil {
+		log.Print(err)
+	}
+	guest := m.Guest{
+		ID:        album.AlbumOwner,
+		FirstName: album.OwnerFirst,
+		LastName:  album.OwnerLast,
+		Status:    "accepted",
+	}
+	guests = append(guests, guest)
+
+	for guestRows.Next() {
+		err = guestRows.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
+		if err != nil {
+			log.Print(err)
+		}
+
+		guests = append(guests, guest)
+	}
+
+	album.InviteList = guests
+
+	responseBytes, err := json.MarshalIndent(album, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
 }
 
 func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
@@ -62,12 +128,6 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 					JOIN album_requests ar
 					ON u.user_id = ar.invited_id
 					WHERE ar.album_id = $1`
-	//UNION
-	//SELECT u.user_id,  u.first_name, u.last_name, true as accepted
-	//FROM users u
-	//JOIN albumuser au
-	//ON u.user_id = au.user_id
-	//WHERE au.album_id = $1
 
 	for _, id := range albumIDs {
 		var album m.Album
@@ -94,17 +154,14 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 		guests = append(guests, guest)
 
 		for guestResponse.Next() {
-			var guest m.Guest
-
 			err = guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
 			if err != nil {
 				log.Print(err)
 			}
 
 			guests = append(guests, guest)
-			album.InviteList = guests
-
 		}
+		album.InviteList = guests
 
 		err = album.PhaseCalculation()
 		if err != nil {
@@ -333,7 +390,8 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 }
 
 func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
-	query := `INSERT INTO album_requests (album_id, invited_id) VALUES ($1, $2) RETURNING request_id, invited_at`
+	query := `INSERT INTO album_requests (album_id, invited_id) 
+										VALUES ($1, $2) RETURNING request_id, invited_at, invite_seen, response_seen, status`
 	var albumRequest = m.AlbumRequestNotification{
 		AlbumID:      album.AlbumID,
 		AlbumName:    album.AlbumName,
@@ -341,11 +399,18 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		AlbumOwner:   album.AlbumOwner,
 		OwnerFirst:   album.OwnerFirst,
 		OwnerLast:    album.OwnerLast,
+		UnlockedAt:   album.UnlockedAt,
 	}
 
 	for _, user := range invited {
 		var wsPayload WebSocketPayload
-		err := connPool.Pool.QueryRow(ctx, query, album.AlbumID, user.ID).Scan(&albumRequest.RequestID, &albumRequest.ReceivedAt)
+
+		albumRequest.GuestID = user.ID
+		albumRequest.GuestFirst = user.FirstName
+		albumRequest.GuestLast = user.LastName
+
+		err := connPool.Pool.QueryRow(ctx, query, album.AlbumID, user.ID).Scan(&albumRequest.RequestID,
+			&albumRequest.ReceivedAt, &albumRequest.InviteSeen, &albumRequest.ResponseSeen, &albumRequest.Status)
 		if err != nil {
 			log.Printf("Failed to add user to album request table: %v", err)
 			return err

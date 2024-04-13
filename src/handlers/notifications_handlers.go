@@ -68,16 +68,19 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequests []m.AlbumRequestNotification
 
-	queryPendingAlbumInvites := `
+	// Looks up any accepted or pending requests from logged in user
+	queryAlbumInvites := `
 						SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name,
-						       		u.last_name, ar.updated_at, a.unlocked_at, ar.invite_seen, ar.status
+						       		u.last_name, u2.user_id, u2.first_name, u2.last_name ,ar.updated_at, a.unlocked_at,
+						       		ar.invite_seen, ar.response_seen, ar.status
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
 						JOIN users u ON u.user_id = a.album_owner
+						JOIN users u2 ON ar.invited_id = u2.user_id
 						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
 						AND (ar.status = 'pending' OR ar.status ='accepted')`
 
-	rows, err := connPool.Pool.Query(ctx, queryPendingAlbumInvites, uid)
+	rows, err := connPool.Pool.Query(ctx, queryAlbumInvites, uid)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to get query DB: %v", err)
 		return nil, err
@@ -87,8 +90,9 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 		var request m.AlbumRequestNotification
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
-			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.ReceivedAt, &request.UnlockedAt,
-			&request.RequestSeen, &request.Status)
+			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.GuestID, &request.GuestFirst,
+			&request.GuestLast, &request.ReceivedAt, &request.UnlockedAt,
+			&request.InviteSeen, &request.ResponseSeen, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object AlbumInvites: %v", err)
 			return nil, err
@@ -101,13 +105,15 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequestResponses []m.AlbumRequestNotification
-	querySentAlbumInviteResponses := `SELECT n.notification_uid, n.album_id, a.album_name, n.media_id, n.sender_id, 
-       										u.first_name, u.last_name, n.received_at, n.seen
-									FROM notifications n
-									JOIN albums a ON a.album_id = n.album_id
-									JOIN users u ON n.sender_id = u.user_id
-									WHERE a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-									AND n.type = 'album_accepted'`
+	querySentAlbumInviteResponses := `SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, 
+       									u2.first_name, u2.last_name, ar.invited_id, u.first_name, u.last_name, 
+       									ar.updated_at, a.unlocked_at, ar.invite_seen, ar.response_seen, ar.status
+									FROM album_requests ar
+									JOIN albums a ON a.album_id = ar.album_id
+									JOIN users u ON ar.invited_id = u.user_id
+									JOIN users u2 on a.album_owner = u2.user_id
+									WHERE (a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
+									AND ar.status='accepted')`
 
 	rows, err := connPool.Pool.Query(ctx, querySentAlbumInviteResponses, uid)
 	if err != nil {
@@ -119,8 +125,8 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
 		var request m.AlbumRequestNotification
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
-			&request.GuestID, &request.GuestFirst, &request.GuestLast, &request.ReceivedAt,
-			&request.RequestSeen)
+			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.GuestID, &request.GuestFirst,
+			&request.GuestLast, &request.ReceivedAt, &request.UnlockedAt, &request.InviteSeen, &request.ResponseSeen, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err
