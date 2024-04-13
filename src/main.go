@@ -76,14 +76,15 @@ func main() {
 	jwtMiddleware := middleware.EnsureValidToken()
 
 	//Route Register
-	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                       // Unprotected
-	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                   // Protected
-	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool, openSearchClient))).Methods("GET")                      // Protected
-	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
-	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                     // Protected
-	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE")  // Protected
-	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
-	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                   // Protected
+	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                      // Unprotected
+	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                  // Protected
+	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool, openSearchClient))).Methods("GET")                     // Protected
+	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                           // Protected
+	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                    // Protected
+	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE") // Protected
+	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                    // Protected
+	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                  // Protected
+	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                    // Protected
@@ -95,7 +96,7 @@ func main() {
 	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
 	r.Handle("/user/friend", jwtMiddleware(h.FriendEndpointHandler(ctx, connPool, rdb))).Methods("GET", "DELETE")                    // Protected
 	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE", "PATCH") // Protected
-	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE")                     // Protected
+	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE", "PATCH")            // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET", "PATCH")            // Protected
 
 	//Start Server

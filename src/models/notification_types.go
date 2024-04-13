@@ -37,7 +37,8 @@ type AlbumRequestNotification struct {
 	GuestFirst   string    `json:"guest_first"`
 	GuestLast    string    `json:"guest_last"`
 	Status       string    `json:"status"`
-	RequestSeen  bool      `json:"request_seen"`
+	InviteSeen   bool      `json:"invite_seen"`
+	ResponseSeen bool      `json:"response_seen"`
 	ReceivedAt   time.Time `json:"received_at"`
 	UnlockedAt   time.Time `json:"unlocked_at"`
 }
