@@ -48,7 +48,7 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 		case http.MethodPost:
 			switch r.URL.Path {
 			case "/image/upvote":
-				POSTImageUpvote(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+				POSTImageUpvote(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 			case "/image/like":
 				POSTImageLike(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/comment":
@@ -109,37 +109,138 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 }
 
-func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
-	var engagement m.Engagement
+func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
+	batch := &pgx.Batch{}
+	notification := m.EngagementNotification{
+		NotificationType: `upvote`,
+	}
+	wsPayload := WebSocketPayload{
+		Operation: `ADD`,
+		Type:      `upvote`,
+	}
+	var guests []m.Guest
 
-	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
+	imageID, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not parse image id from request")
 		log.Printf("Could not parse image id from request: %v", err)
 		return
 	}
 
-	query := `INSERT INTO upvotes (user_id, image_id)
-			  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)`
+	// TODO: Remove upvote_id from upvotes table
+	addToUpvotesQuery := `INSERT INTO upvotes (user_id, image_id)
+			  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)
+			  RETURNING user_id, image_id`
 
-	_, err = connPool.Pool.Exec(ctx, query, uid, imageId)
+	// Batched Queries
+	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
+	albumDataQuery := `SELECT a.album_id, a.album_name
+						FROM albums a
+						JOIN imagealbum ia
+						ON a.album_id = ia.album_id
+						WHERE ia.image_id=$1`
+	engagerQuery := `SELECT first_name, last_name FROM users WHERE user_id=$1`
+
+	// Add Notification to be Sent to user
+	addToNotifications := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type) 
+							VALUES ($1, $2, $3, (SELECT user_id FROM users WHERE auth_zero_id = $4), 'upvote')
+							RETURNING notification_uid, received_at, seen`
+
+	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
+                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
+
+	// Add to Upvote Table Query
+	err = connPool.Pool.QueryRow(ctx, addToUpvotesQuery, uid, imageID).Scan(&notification.NotifierID,
+		&notification.ImageID)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Image could not be upvoted")
 		log.Printf("Image could not be upvoted: %v", err)
 		return
 	}
 
-	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
+	batch.Queue(countQuery, imageID)
+	batch.Queue(albumDataQuery, imageID)
+	batch.Queue(engagerQuery, &notification.NotifierID)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
-	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
-	err = countResponse.Scan(&engagement.Count)
+	//Count Query
+	err = batchResults.QueryRow().Scan(&notification.NewCount)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not get upvote count")
 		log.Printf("Could not get upvote count: %v", err)
 		return
 	}
 
-	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
+	// Album Data Query
+	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.AlbumName)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get upvote album data")
+		log.Printf("Could not get upvote album data: %v", err)
+		return
+	}
+
+	// Engager Query
+	err = batchResults.QueryRow().Scan(&notification.NotifierFirst, &notification.NotifierLast)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get upvote engager data")
+		log.Printf("Could not get upvote engager data: %v", err)
+		return
+	}
+
+	// Add to Notification Table for Auth'd User
+	err = connPool.Pool.QueryRow(ctx, addToNotifications, &notification.AlbumID, &notification.ImageID,
+		&notification.NotifierID, uid).Scan(&notification.NotificationID, &notification.ReceivedAt, &notification.NotificationSeen)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: With adding to notification table")
+		log.Printf("Adding to notification table error: %v", err)
+		return
+	}
+
+	// Get List of User IDs to Send Notification Too
+	guestRows, err := connPool.Pool.Query(ctx, getGuestIDs, &notification.AlbumID, uid)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Couldn't get guest list")
+		log.Printf("Couldn't get guest list: %v", err)
+		return
+	}
+
+	for guestRows.Next() {
+		var guest m.Guest
+
+		err = guestRows.Scan(&guest.ID)
+		if err != nil {
+			log.Print(err)
+		}
+
+		guests = append(guests, guest)
+	}
+
+	// Add struct to websocket struct
+	wsPayload.Payload = notification
+
+	for _, guest := range guests {
+		payload := WebSocketPayload{
+			Operation: `ADD`,
+			Type:      `upvote`,
+			UserID:    guest.ID,
+			Payload:   notification,
+		}
+		//wsPayload.UserID = guest.ID
+		//log.Printf("wsPayload guest loop: %v", payload.UserID)
+
+		// Send payload to WebSocket
+		jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
+		if jsonErr != nil {
+			log.Print(jsonErr)
+		}
+
+		err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+		if err != nil {
+			log.Print(err)
+		}
+	}
+
+	responseJSON, err := json.MarshalIndent(notification.NewCount, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -197,7 +298,13 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 }
 
 func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	batch := &pgx.Batch{}
 	var engagement m.Engagement
+	//var notification m.EngagementNotification
+	//wsPayload := WebSocketPayload{
+	//	Operation: "ADD",
+	//	Type:      "upvote",
+	//}
 
 	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
@@ -217,9 +324,13 @@ func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, 
 	}
 
 	countQuery := `SELECT COUNT(*) FROM likes WHERE image_id=$1`
+	//albumInformation := ``
 
-	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
-	err = countResponse.Scan(&engagement.Count)
+	batch.Queue(countQuery, imageId)
+
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	err = batchResults.QueryRow().Scan(&engagement.Count)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not get like count")
 		log.Printf("Could not get like count: %v", err)

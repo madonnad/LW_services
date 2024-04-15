@@ -70,11 +70,10 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 }
 
 func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string, quit chan int) {
-
+	pubSub := rdb.Subscribe(ctx, "notifications")
 	for connectionState.Active == true {
 
-		pubSub := rdb.Subscribe(ctx, "notifications")
-		notificationChannel := pubSub.Channel()
+		notificationChannel := pubSub.Channel(redis.WithChannelSize(250))
 
 		select {
 		case message := <-notificationChannel:

@@ -102,6 +102,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	if err != nil {
 		log.Print(err)
 	}
+
 	for rows.Next() {
 		var guest m.Guest
 
