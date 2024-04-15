@@ -9,19 +9,18 @@ type Notification struct {
 	AlbumRequestResponses []AlbumRequestNotification  `json:"album_request_responses"`
 }
 
-type GenericNotification struct {
-	NotificationID   string    `json:"notification_id"`
-	MediaID          string    `json:"media_id"`
+type EngagementNotification struct {
+	NotificationID   string    `json:"notification_id"` // Notification UUID
+	ImageID          string    `json:"image_id"`        // Image_ID
 	AlbumID          string    `json:"album_id"`
 	AlbumName        string    `json:"album_name"`
-	Caption          string    `json:"caption"` //Optional
-	Comment          string    `json:"comment"` //Optional
-	ReceiverID       string    `json:"receiver_id"`
-	NotifierID       string    `json:"notifier_id"`
+	ReceiverID       string    `json:"receiver_id"` // Logged In User (or Album Guest)
+	NotifierID       string    `json:"notifier_id"` // Person who is engaging
 	NotifierFirst    string    `json:"notifier_first"`
 	NotifierLast     string    `json:"notifier_last"`
-	NotificationSeen bool      `json:"notification_seen"`
-	NotificationType string    `json:"notification_type"`
+	NotificationSeen bool      `json:"notification_seen"` // Seen by the owner of that content (We don't care about album guests receiving noti's they just need to get their albums updated)
+	NotificationType string    `json:"notification_type"` // UPVOTE, LIKE, COMMENT, etc etc
+	NewCount         int       `json:"new_count"`
 	ReceivedAt       time.Time `json:"received_at"`
 }
 
