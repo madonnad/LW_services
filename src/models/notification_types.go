@@ -14,7 +14,7 @@ type EngagementNotification struct {
 	ImageID          string    `json:"image_id"`        // Image_ID
 	AlbumID          string    `json:"album_id"`
 	AlbumName        string    `json:"album_name"`
-	ReceiverID       string    `json:"receiver_id"` // Logged In User (or Album Guest)
+	ReceiverID       string    `json:"receiver_id"` // Content Owner
 	NotifierID       string    `json:"notifier_id"` // Person who is engaging
 	NotifierFirst    string    `json:"notifier_first"`
 	NotifierLast     string    `json:"notifier_last"`
