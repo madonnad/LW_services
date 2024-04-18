@@ -76,9 +76,9 @@ func main() {
 	jwtMiddleware := middleware.EnsureValidToken()
 
 	//Route Register
-	r.HandleFunc("/", connPool.GETHandlerRoot)                                     // Unprotected
-	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx))) // Protected
-	r.Handle("/ws/album")
+	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                       // Unprotected
+	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                   // Protected
+	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                             // Protected
 	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool, openSearchClient))).Methods("GET")                      // Protected
 	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
 	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                     // Protected
