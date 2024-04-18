@@ -68,7 +68,7 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 
 	var newConnection = ConnectionState{Conn: conn, Active: true}
 
-	log.Printf("Listening via %v WebSocket...", channel)
+	//log.Printf("Listening via %v WebSocket...", channel)
 
 	quit := make(chan int)
 	go newConnection.ListenAndWrite(ctx, conn, rdb, uid, quit, channel)
@@ -94,7 +94,7 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 		}
 	}
 
-	log.Printf("The %v websocket is closing..", channel)
+	//log.Printf("The %v websocket is closing..", channel)
 	err := pubSub.Close()
 	if err != nil {
 		log.Printf("Error closing redis channel: %v with error: %v", channel, err)

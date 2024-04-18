@@ -95,6 +95,8 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 
 	album.InviteList = guests
 
+	err = album.PhaseCalculation()
+
 	responseBytes, err := json.MarshalIndent(album, "", "\t")
 	if err != nil {
 		log.Panic(err)
