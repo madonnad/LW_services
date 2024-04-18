@@ -28,6 +28,7 @@ type WebSocketPayload struct {
 	Operation string      `json:"operation"`
 	Type      string      `json:"type"`
 	UserID    string      `json:"user_id"`
+	AlbumID   string      `json:"album_ID"`
 	Payload   interface{} `json:"payload"`
 }
 
@@ -38,11 +39,17 @@ func WebSocketEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context
 			log.Printf("Failed to get validated claims")
 			return
 		}
-		WebSocket(w, r, connPool, rdb, ctx, claims.RegisteredClaims.Subject)
+		switch r.URL.Path {
+		case "/ws":
+			WebSocket(w, r, connPool, rdb, ctx, claims.RegisteredClaims.Subject, "notifications")
+		case "/ws/album":
+			var channel string = r.URL.Query().Get("channel")
+			WebSocket(w, r, connPool, rdb, ctx, claims.RegisteredClaims.Subject, channel)
+		}
 	})
 }
 
-func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context, auth0UID string) {
+func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, ctx context.Context, auth0UID string, channel string) {
 	var uid string
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -64,20 +71,20 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 	log.Print("Listening via WebSocket...")
 
 	quit := make(chan int)
-	go newConnection.ListenAndWrite(ctx, conn, rdb, uid, quit)
+	go newConnection.ListenAndWrite(ctx, conn, rdb, uid, quit, channel)
 	go newConnection.CheckConnectionStatus(ctx, conn, quit)
 
 }
 
-func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string, quit chan int) {
-	pubSub := rdb.Subscribe(ctx, "notifications")
+func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn *websocket.Conn, rdb *redis.Client, uid string, quit chan int, channel string) {
+	pubSub := rdb.Subscribe(ctx, channel)
 	for connectionState.Active == true {
 
 		notificationChannel := pubSub.Channel(redis.WithChannelSize(250))
 
 		select {
 		case message := <-notificationChannel:
-			err := sendWebSocketNotification(conn, message, uid)
+			err := sendWebSocketNotification(conn, message, uid, channel)
 			if err != nil {
 				log.Printf("ListenAndWriteError: %v", err)
 				return
@@ -115,18 +122,29 @@ func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Contex
 	}
 }
 
-func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid string) error {
+func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid string, channel string) error {
 	var wsPayload WebSocketPayload
 	err := json.Unmarshal([]byte(message.Payload), &wsPayload)
 	if err != nil {
 		return err
 	}
 
-	if wsPayload.UserID == uid {
-		err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
-		if err != nil {
-			log.Printf("sendWebSocketNotification: %v", err)
-			return err
+	switch channel {
+	case "notifications":
+		if wsPayload.UserID == uid {
+			err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
+			if err != nil {
+				log.Printf("sendWebSocketNotification: %v", err)
+				return err
+			}
+		}
+	default:
+		if wsPayload.AlbumID == channel {
+			err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
+			if err != nil {
+				log.Printf("sendWebSocketNotification: %v", err)
+				return err
+			}
 		}
 	}
 	return nil
