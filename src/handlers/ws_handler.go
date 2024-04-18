@@ -68,7 +68,7 @@ func WebSocket(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *
 
 	var newConnection = ConnectionState{Conn: conn, Active: true}
 
-	log.Print("Listening via WebSocket...")
+	log.Printf("Listening via %v WebSocket...", channel)
 
 	quit := make(chan int)
 	go newConnection.ListenAndWrite(ctx, conn, rdb, uid, quit, channel)
@@ -94,8 +94,13 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 		}
 	}
 
-	log.Print("The websocket is closing..")
-	err := conn.Close()
+	log.Printf("The %v websocket is closing..", channel)
+	err := pubSub.Close()
+	if err != nil {
+		log.Printf("Error closing redis channel: %v with error: %v", channel, err)
+		return
+	}
+	err = conn.Close()
 	if err != nil {
 		log.Printf("Error closing websocket: %v", err)
 		return
@@ -138,7 +143,8 @@ func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid
 				return err
 			}
 		}
-	default:
+		return nil
+	case wsPayload.AlbumID:
 		if wsPayload.AlbumID == channel {
 			err = conn.WriteMessage(websocket.TextMessage, []byte(message.Payload))
 			if err != nil {
@@ -146,6 +152,7 @@ func sendWebSocketNotification(conn *websocket.Conn, message *redis.Message, uid
 				return err
 			}
 		}
+		return nil
 	}
 	return nil
 }

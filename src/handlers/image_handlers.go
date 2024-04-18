@@ -114,11 +114,6 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 	notification := m.EngagementNotification{
 		NotificationType: `upvote`,
 	}
-	wsPayload := WebSocketPayload{
-		Operation: `ADD`,
-		Type:      `upvote`,
-	}
-	var guests []m.Guest
 
 	imageID, err := uuid.Parse(r.URL.Query().Get("image_id"))
 	if err != nil {
@@ -134,20 +129,19 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	// Batched Queries
 	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
-	albumDataQuery := `SELECT a.album_id, a.album_name
+	albumDataQuery := `SELECT a.album_id, a.album_name, i.image_owner
 						FROM albums a
 						JOIN imagealbum ia
 						ON a.album_id = ia.album_id
+						JOIN images i 
+						ON ia.image_id = i.image_id
 						WHERE ia.image_id=$1`
 	engagerQuery := `SELECT first_name, last_name FROM users WHERE user_id=$1`
 
 	// Add Notification to be Sent to user
 	addToNotifications := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type) 
-							VALUES ($1, $2, $3, (SELECT user_id FROM users WHERE auth_zero_id = $4), 'upvote')
+							VALUES ($1, $2, $3, $4, 'upvote')
 							RETURNING notification_uid, received_at, seen`
-
-	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
-                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
 
 	// Add to Upvote Table Query
 	err = connPool.Pool.QueryRow(ctx, addToUpvotesQuery, uid, imageID).Scan(&notification.NotifierID,
@@ -172,7 +166,7 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 	}
 
 	// Album Data Query
-	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.AlbumName)
+	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.AlbumName, &notification.ReceiverID)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not get upvote album data")
 		log.Printf("Could not get upvote album data: %v", err)
@@ -188,56 +182,40 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 	}
 
 	// Add to Notification Table for Auth'd User
-	err = connPool.Pool.QueryRow(ctx, addToNotifications, &notification.AlbumID, &notification.ImageID,
-		&notification.NotifierID, uid).Scan(&notification.NotificationID, &notification.ReceivedAt, &notification.NotificationSeen)
-	if err != nil {
-		WriteErrorToWriter(w, "Error: With adding to notification table")
-		log.Printf("Adding to notification table error: %v", err)
-		return
-	}
-
-	// Get List of User IDs to Send Notification Too
-	guestRows, err := connPool.Pool.Query(ctx, getGuestIDs, &notification.AlbumID, uid)
-	if err != nil {
-		WriteErrorToWriter(w, "Error: Couldn't get guest list")
-		log.Printf("Couldn't get guest list: %v", err)
-		return
-	}
-
-	for guestRows.Next() {
-		var guest m.Guest
-
-		err = guestRows.Scan(&guest.ID)
+	if notification.NotifierID != notification.ReceiverID {
+		err = connPool.Pool.QueryRow(ctx, addToNotifications, &notification.AlbumID, &notification.ImageID,
+			&notification.NotifierID, notification.ReceiverID).Scan(&notification.NotificationID, &notification.ReceivedAt, &notification.NotificationSeen)
 		if err != nil {
-			log.Print(err)
+			WriteErrorToWriter(w, "Error: With adding to notification table")
+			log.Printf("Adding to notification table error: %v", err)
+			return
 		}
 
-		guests = append(guests, guest)
 	}
 
-	// Add struct to websocket struct
-	wsPayload.Payload = notification
+	payload := WebSocketPayload{
+		Operation: `ADD`,
+		Type:      `upvote`,
+		UserID:    notification.ReceiverID,
+		AlbumID:   notification.AlbumID,
+		Payload:   notification,
+	}
+	payload.Payload = notification
 
-	for _, guest := range guests {
-		payload := WebSocketPayload{
-			Operation: `ADD`,
-			Type:      `upvote`,
-			UserID:    guest.ID,
-			Payload:   notification,
-		}
-		//wsPayload.UserID = guest.ID
-		//log.Printf("wsPayload guest loop: %v", payload.UserID)
+	// Send payload to WebSocket
+	jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
+	if jsonErr != nil {
+		log.Print(jsonErr)
+	}
 
-		// Send payload to WebSocket
-		jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
-		if jsonErr != nil {
-			log.Print(jsonErr)
-		}
+	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
+	}
 
-		err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
-		if err != nil {
-			log.Print(err)
-		}
+	err = rdb.Publish(ctx, notification.AlbumID, jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
 	}
 
 	responseJSON, err := json.MarshalIndent(notification.NewCount, "", "\t")
