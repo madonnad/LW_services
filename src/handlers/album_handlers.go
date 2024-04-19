@@ -29,6 +29,8 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				GETAlbumsByUserID(w, r, connPool, claims.RegisteredClaims.Subject, ctx)
 			case "/album":
 				GETAlbumByAlbumID(w, r, connPool, ctx, claims.RegisteredClaims.Subject)
+			case "/album/images":
+				GETAlbumImagesByID(w, r, connPool, ctx, claims.RegisteredClaims.Subject)
 			case "/album/revealed":
 				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
 			case "/album/guests":
@@ -104,6 +106,23 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBytes)
+}
+
+func GETAlbumImagesByID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context, authZeroID string) {
+	var album m.Album
+
+	album.AlbumID = r.URL.Query().Get("album_id")
+
+	QueryImagesData(ctx, connPool, &album, authZeroID)
+
+	responseBytes, err := json.MarshalIndent(album.Images, "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+
 }
 
 func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {

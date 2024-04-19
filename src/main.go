@@ -86,6 +86,7 @@ func main() {
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                   // Protected
 	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                                     // Protected
+	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                    // Protected
