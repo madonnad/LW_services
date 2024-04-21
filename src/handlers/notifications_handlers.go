@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-	"time"
-
-	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
-	"github.com/auth0/go-jwt-middleware/v2/validator"
-	"github.com/redis/go-redis/v9"
 )
 
 func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Client) http.Handler {
@@ -36,23 +34,26 @@ func NotificationsEndpointHandler(ctx context.Context, connPool *m.PGPool, rdb *
 func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
 	var notifications m.Notification
 
-	searchDate := time.Now().AddDate(0, -6, 0).Format("2006-01-02 15:04:05")
+	//searchDate := time.Now().AddDate(0, -6, 0).Format("2006-01-02 15:04:05")
 
-	likedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "liked")
-	upvotedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "upvote")
+	//likedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "liked")
+	//upvotedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "upvote")
+
 	friendRequests, _ := QueryFriendRequests(ctx, w, connPool, uid)
 	albumRequests, _ := QueryAlbumRequests(ctx, w, connPool, uid)
 	albumRequestsResponses, _ := QueryAlbumRequestResponses(ctx, w, connPool, uid)
+	engagementNotifications, _ := QueryEngagementNotifications(ctx, w, connPool, uid)
 
-	for _, item := range likedSummary {
-		notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
-	}
-	for _, item := range upvotedSummary {
-		notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
-	}
+	//for _, item := range likedSummary {
+	//	notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
+	//}
+	//for _, item := range upvotedSummary {
+	//	notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
+	//}
 	notifications.FriendRequests = friendRequests
 	notifications.AlbumRequests = albumRequests
 	notifications.AlbumRequestResponses = albumRequestsResponses
+	notifications.EngagementNotification = engagementNotifications
 
 	responseBytes, err := json.MarshalIndent(notifications, "", "\t")
 	if err != nil {
@@ -240,6 +241,42 @@ func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connP
 	}
 
 	return summaryNotifications, nil
+}
+
+func QueryEngagementNotifications(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.EngagementNotification, error) {
+	var notifications []m.EngagementNotification
+
+	engagementQuery := `SELECT notification_uid, media_id, n.album_id, a.album_name, sender_id,
+       								u.first_name, u.last_name, receiver_id, received_at, type, seen
+						FROM notifications n 
+						JOIN users u
+						ON n.sender_id = u.user_id
+						JOIN albums a 
+						ON n.album_id = a.album_id
+						WHERE receiver_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)
+						LIMIT 25`
+
+	rows, err := connPool.Pool.Query(ctx, engagementQuery, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Failed to fetch notifications: %v", err)
+		return nil, err
+	}
+
+	for rows.Next() {
+		var noti m.EngagementNotification
+		err = rows.Scan(&noti.NotificationID, &noti.ImageID, &noti.AlbumID, &noti.AlbumName, &noti.NotifierID,
+			&noti.NotifierFirst, &noti.NotifierLast, &noti.ReceiverID, &noti.ReceivedAt,
+			&noti.NotificationType, &noti.NotificationSeen)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to scan notification: %v", err)
+			return nil, err
+		}
+
+		notifications = append(notifications, noti)
+	}
+
+	return notifications, nil
+
 }
 
 // The following function will check to see if a summary for an Album and Noti type combination is already created to append to it
