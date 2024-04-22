@@ -32,7 +32,7 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			case "/image/like":
 				DELETEImageLike(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/upvote":
-				DELETEImageUpvote(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+				DELETEImageUpvote(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 			}
 		case http.MethodPatch:
 			PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
@@ -61,44 +61,76 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 		}
 	})
 }
-func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
-	var engagement m.Engagement
-
-	imageId, err := uuid.Parse(r.URL.Query().Get("image_id"))
-	if err != nil {
-		WriteErrorToWriter(w, "Error: Could not parse image id from request")
-		log.Printf("Could not parse image id from request: %v", err)
-		return
+func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
+	notification := m.EngagementNotification{
+		NotificationType: `upvote`,
 	}
 
-	query := `DELETE FROM upvotes
-			  WHERE image_id=$1
-			  AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$2)`
+	notification.ImageID = r.URL.Query().Get("image_id")
 
-	status, err := connPool.Pool.Exec(ctx, query, imageId, uid)
+	upvoteQuery := `DELETE FROM upvotes
+			  WHERE (image_id=$1
+			  AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$2))`
+	notificationQuery := `DELETE FROM notifications
+						WHERE (media_id=$1
+						AND sender_id=(SELECT user_id FROM users WHERE auth_zero_id=$2))
+						RETURNING album_id, receiver_id, sender_id`
+
+	batch := &pgx.Batch{}
+	batch.Queue(upvoteQuery, &notification.ImageID, uid)
+	batch.Queue(notificationQuery, &notification.ImageID, uid)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	status, err := batchResults.Exec()
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Upvote could not be deleted")
 		log.Printf("Upvote could not be deleted: %v", err)
 		return
 	}
-
 	if status.RowsAffected() < 1 {
 		WriteErrorToWriter(w, "Error: Return SQL status is not delete")
 		log.Printf("Return SQL status is not delete %v", err)
 		return
 	}
 
+	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.ReceiverID, &notification.NotifierID)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Notification could not be deleted")
+		log.Printf("Notification could not be deleted: %v", err)
+		return
+	}
+
 	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
 
-	countResponse := connPool.Pool.QueryRow(ctx, countQuery, imageId)
-	err = countResponse.Scan(&engagement.Count)
+	countResponse := connPool.Pool.QueryRow(ctx, countQuery, &notification.ImageID)
+	err = countResponse.Scan(&notification.NewCount)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Could not get upvote count")
 		log.Printf("Could not get upvote count: %v", err)
 		return
 	}
 
-	responseJSON, err := json.MarshalIndent(engagement, "", "\t")
+	payload := WebSocketPayload{
+		Operation: `REMOVE`,
+		Type:      `upvote`,
+		UserID:    notification.ReceiverID,
+		AlbumID:   notification.AlbumID,
+		Payload:   notification,
+	}
+	payload.Payload = notification
+
+	// Send payload to WebSocket
+	jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
+	if jsonErr != nil {
+		log.Print(jsonErr)
+	}
+
+	err = rdb.Publish(ctx, notification.AlbumID, jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
+	}
+
+	responseJSON, err := json.MarshalIndent(notification, "", "\t")
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
@@ -106,7 +138,6 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseJSON)
-
 }
 
 func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
