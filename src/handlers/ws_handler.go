@@ -111,17 +111,15 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 func (connectionState *ConnectionState) CheckConnectionStatus(ctx context.Context, conn *websocket.Conn, quit chan int) {
 
 	for {
-		message, _, err := conn.ReadMessage()
+		_, _, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err) {
-				log.Printf("error: %v", err)
+			if websocket.IsCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("Expected Closure: %v", err)
 				quit <- 0
 				return
 			}
-		}
-		if message == 1000 {
+			log.Printf("WebSocket Error: %v", err)
 			quit <- 0
-			log.Printf("Closing: %v", message)
 			return
 		}
 	}
