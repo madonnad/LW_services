@@ -52,7 +52,7 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			case "/image/like":
 				POSTImageLike(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 			case "/image/comment":
-				POSTNewComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+				POSTNewComment(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 			case "/user/image":
 				POSTNewImage(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/user/recap":
@@ -427,7 +427,6 @@ func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, 
 		AlbumID:   notification.AlbumID,
 		Payload:   notification,
 	}
-	payload.Payload = notification
 
 	// Send payload to WebSocket
 	jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
@@ -465,7 +464,7 @@ func DELETEImageComment(ctx context.Context, w http.ResponseWriter, r *http.Requ
 
 	query := `DELETE FROM comments
 			  WHERE id=$1
-			  AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$2)`
+			  AND commenter_id=(SELECT user_id FROM users WHERE auth_zero_id=$2)`
 
 	status, err := connPool.Pool.Exec(ctx, query, commentId, uid)
 	if err != nil {
@@ -501,7 +500,7 @@ func PATCHImageComment(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	query := `UPDATE comments
 			  SET comment_text=$1, updated_at=(now() AT TIME ZONE 'utc'::text)
-              WHERE id=$2 AND user_id=(SELECT user_id FROM users WHERE auth_zero_id=$3)`
+              WHERE id=$2 AND commenter_id=(SELECT user_id FROM users WHERE auth_zero_id=$3)`
 
 	status, err := connPool.Pool.Exec(ctx, query, comment.Comment, comment.ID, uid)
 	if err != nil {
@@ -535,10 +534,10 @@ func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	query := `SELECT c.id, c.image_id, u.user_id, u.first_name, u.last_name ,c.comment_text, c.created_at, c.updated_at
+	query := `SELECT c.id, c.image_id, u.user_id, u.first_name, u.last_name ,c.comment_text, c.created_at, c.updated_at, c.seen
 				FROM comments c
 				JOIN  users u
-				ON u.user_id = c.user_id
+				ON u.user_id = c.commenter_id
 				WHERE image_id=$1`
 
 	result, err := connPool.Pool.Query(ctx, query, imageId)
@@ -550,7 +549,8 @@ func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Reques
 
 	for result.Next() {
 		var comment m.Comment
-		err := result.Scan(&comment.ID, &comment.ImageID, &comment.UserID, &comment.FirstName, &comment.LastName, &comment.Comment, &comment.CreatedAt, &comment.UpdatedAt)
+		err := result.Scan(&comment.ID, &comment.ImageID, &comment.UserID, &comment.FirstName, &comment.LastName,
+			&comment.Comment, &comment.CreatedAt, &comment.UpdatedAt)
 		if err != nil {
 			WriteErrorToWriter(w, "Error: Failed to unpack response from DB")
 			log.Printf("Failed to unpack response from DB: %v", err)
@@ -574,30 +574,82 @@ func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	w.Write(responseBytes)
 }
 
-func POSTNewComment(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
-	var newComment m.NewComment
-	var newUid string
+func POSTNewComment(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
+	var comment m.Comment
 
-	err := json.NewDecoder(r.Body).Decode(&newComment)
+	err := json.NewDecoder(r.Body).Decode(&comment)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Bad Comment")
 		log.Printf("Unable to decode new comment: %v", err)
 		return
 	}
 
-	query := `INSERT INTO comments (comment_text, image_id, user_id)
-			  VALUES ($1, $2, (SELECT user_id FROM users WHERE auth_zero_id=$3)) RETURNING id`
+	// Add the comment to the comment table
+	addCommentQuery := `INSERT INTO comments (comment_text, image_id, commenter_id)
+			  			VALUES ($1, $2, (SELECT user_id FROM users WHERE auth_zero_id=$3))
+			  			RETURNING id, commenter_id, comment_text, created_at, seen`
 
-	result := connPool.Pool.QueryRow(ctx, query, newComment.Comment, newComment.ImageID, uid)
+	imageDataQuery := `SELECT image_owner, ia.album_id, a.album_name
+						FROM images i
+						JOIN imagealbum ia
+						ON i.image_id = ia.image_id
+						JOIN albums a 
+						ON a.album_id = ia.album_id
+						WHERE i.image_id = $1`
 
-	err = result.Scan(&newUid)
+	commenterInfoQuery := `SELECT first_name, last_name FROM users WHERE user_id = $1`
+
+	err = connPool.Pool.QueryRow(ctx, addCommentQuery, comment.Comment, comment.ImageID, uid).Scan(
+		&comment.ID, &comment.UserID, &comment.Comment, &comment.CreatedAt, &comment.Seen)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Couldn't post comment")
 		log.Printf("Couldn't post comment: %v", err)
 		return
 	}
 
-	responseJSON, err := json.Marshal(newUid)
+	batch := &pgx.Batch{}
+	batch.Queue(imageDataQuery, comment.ImageID)
+	batch.Queue(commenterInfoQuery, comment.UserID)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	err = batchResults.QueryRow().Scan(&comment.ImageOwner, &comment.AlbumID, &comment.AlbumName)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get image owner")
+		log.Printf("Could not get image owner: %v", err)
+		return
+	}
+	err = batchResults.QueryRow().Scan(&comment.FirstName, &comment.LastName)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get commenter information")
+		log.Printf("Could not get commenter information: %v", err)
+		return
+	}
+
+	payload := WebSocketPayload{
+		Operation: `ADD`,
+		Type:      `comment`,
+		UserID:    comment.ImageOwner,
+		AlbumID:   comment.AlbumID,
+		Payload:   comment,
+	}
+
+	// Send payload to WebSocket
+	jsonPayload, jsonErr := json.MarshalIndent(payload, "", "\t")
+	if jsonErr != nil {
+		log.Print(jsonErr)
+	}
+
+	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
+	}
+
+	err = rdb.Publish(ctx, payload.AlbumID, jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
+	}
+
+	responseJSON, err := json.Marshal(comment)
 	if err != nil {
 		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 		return
