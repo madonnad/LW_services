@@ -35,7 +35,13 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				DELETEImageUpvote(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
 			}
 		case http.MethodPatch:
-			PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			switch r.URL.Path {
+			case "/image/comment":
+				PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			case "/image/comment/seen":
+				PATCHCommentSeen(ctx, w, r, connPool)
+			}
+
 		case http.MethodGet:
 			switch r.URL.Path {
 			case "/image/comment":
@@ -523,6 +529,29 @@ func PATCHImageComment(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseJSON)
+}
+
+func PATCHCommentSeen(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	commentID := r.URL.Query().Get("id")
+
+	seenQuery := `UPDATE comments SET seen = true WHERE id=$1`
+
+	_, err := connPool.Pool.Exec(ctx, seenQuery, commentID)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Couldn't update comment to seen")
+		log.Printf("Couldn't update comment to seen: %v", err)
+		return
+	}
+	//Respond to the calling user that the action was successful
+	responseBytes, err := json.MarshalIndent("Comment was marked as seen", "", "\t")
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+
 }
 
 func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
