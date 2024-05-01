@@ -625,6 +625,16 @@ func POSTNewComment(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	if comment.ImageOwner == comment.UserID {
+		markRead := `UPDATE comments SET seen = true WHERE id = $1`
+		_, err = connPool.Pool.Exec(ctx, markRead, comment.ID)
+		if err != nil {
+			WriteErrorToWriter(w, "Error: Could not get mark comment as read")
+			log.Printf("Could not get mark comment as read: %v", err)
+			return
+		}
+	}
+
 	payload := WebSocketPayload{
 		Operation: `ADD`,
 		Type:      `comment`,
