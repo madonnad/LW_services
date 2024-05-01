@@ -550,7 +550,7 @@ func GETImageComments(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	for result.Next() {
 		var comment m.Comment
 		err := result.Scan(&comment.ID, &comment.ImageID, &comment.UserID, &comment.FirstName, &comment.LastName,
-			&comment.Comment, &comment.CreatedAt, &comment.UpdatedAt)
+			&comment.Comment, &comment.CreatedAt, &comment.UpdatedAt, &comment.Seen)
 		if err != nil {
 			WriteErrorToWriter(w, "Error: Failed to unpack response from DB")
 			log.Printf("Failed to unpack response from DB: %v", err)

@@ -36,24 +36,17 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 
 	//searchDate := time.Now().AddDate(0, -6, 0).Format("2006-01-02 15:04:05")
 
-	//likedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "liked")
-	//upvotedSummary, _ := QuerySummaryNotifications(ctx, w, connPool, uid, searchDate, "upvote")
-
 	friendRequests, _ := QueryFriendRequests(ctx, w, connPool, uid)
 	albumRequests, _ := QueryAlbumRequests(ctx, w, connPool, uid)
 	albumRequestsResponses, _ := QueryAlbumRequestResponses(ctx, w, connPool, uid)
 	engagementNotifications, _ := QueryEngagementNotifications(ctx, w, connPool, uid)
+	commentNotifications, _ := QueryCommentNotifications(ctx, w, connPool, uid)
 
-	//for _, item := range likedSummary {
-	//	notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
-	//}
-	//for _, item := range upvotedSummary {
-	//	notifications.SummaryNotifications = append(notifications.SummaryNotifications, item)
-	//}
 	notifications.FriendRequests = friendRequests
 	notifications.AlbumRequests = albumRequests
 	notifications.AlbumRequestResponses = albumRequestsResponses
 	notifications.EngagementNotification = engagementNotifications
+	notifications.CommentNotifications = commentNotifications
 
 	responseBytes, err := json.MarshalIndent(notifications, "", "\t")
 	if err != nil {
@@ -191,6 +184,47 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 	}
 
 	return friendRequests, nil
+}
+
+func QueryCommentNotifications(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.Comment, error) {
+	var notifications []m.Comment
+
+	commentQuery := `SELECT id, c.image_id, i.image_owner, a.album_id, a.album_name, commenter_id, u.first_name, u.last_name, 
+       				comment_text, c.created_at, updated_at, seen 
+					FROM comments c
+					JOIN images i
+					ON c.image_id = i.image_id
+					JOIN users u 
+					ON c.commenter_id = u.user_id
+					JOIN imagealbum ia
+					ON i.image_id = ia.image_id
+					JOIN albums a
+					ON ia.album_id = a.album_id
+					WHERE (i.image_owner=(SELECT user_id FROM users WHERE auth_zero_id=$1) 
+					           AND commenter_id != (SELECT user_id FROM users WHERE auth_zero_id=$1))
+					LIMIT 25`
+	rows, err := connPool.Pool.Query(ctx, commentQuery, uid)
+	if err != nil {
+		fmt.Fprintf(w, "Failed to fetch comments: %v", err)
+		return nil, err
+	}
+
+	for rows.Next() {
+		var comment m.Comment
+
+		err = rows.Scan(&comment.ID, &comment.ImageID, &comment.ImageOwner, &comment.AlbumID, &comment.AlbumName, &comment.UserID,
+			&comment.FirstName, &comment.LastName, &comment.Comment, &comment.CreatedAt, &comment.UpdatedAt,
+			&comment.Seen)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to scan comment: %v", err)
+			return nil, err
+		}
+
+		notifications = append(notifications, comment)
+
+	}
+
+	return notifications, nil
 }
 
 func QuerySummaryNotifications(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string, dateString string, searchType string) ([]m.SummaryNotification, error) {
