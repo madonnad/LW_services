@@ -3,11 +3,11 @@ package models
 import "time"
 
 type Notification struct {
-	SummaryNotifications   []SummaryNotification       `json:"summary_notifications"`
 	EngagementNotification []EngagementNotification    `json:"engagement_notification"`
 	AlbumRequests          []AlbumRequestNotification  `json:"album_invites"`
 	FriendRequests         []FriendRequestNotification `json:"friend_requests"`
 	AlbumRequestResponses  []AlbumRequestNotification  `json:"album_request_responses"`
+	CommentNotifications   []Comment                   `json:"comment_notifications"`
 }
 
 type EngagementNotification struct {
