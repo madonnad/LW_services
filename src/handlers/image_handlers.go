@@ -87,6 +87,13 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	batch.Queue(upvoteQuery, &notification.ImageID, uid)
 	batch.Queue(notificationQuery, &notification.ImageID, uid)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	status, err := batchResults.Exec()
 	if err != nil {
@@ -194,6 +201,13 @@ func POSTImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Request
 	batch.Queue(albumDataQuery, imageID)
 	batch.Queue(engagerQuery, &notification.NotifierID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	//Count Query
 	err = batchResults.QueryRow().Scan(&notification.NewCount)
@@ -285,6 +299,13 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 	batch.Queue(upvoteQuery, &notification.ImageID, uid)
 	batch.Queue(notificationQuery, &notification.ImageID, uid)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	status, err := batchResults.Exec()
 	if err != nil {
@@ -391,6 +412,13 @@ func POSTImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request, 
 	batch.Queue(albumDataQuery, imageID)
 	batch.Queue(engagerQuery, &notification.NotifierID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err = batchResults.QueryRow().Scan(&notification.NewCount)
 	if err != nil {
@@ -640,6 +668,13 @@ func POSTNewComment(ctx context.Context, w http.ResponseWriter, r *http.Request,
 	batch.Queue(imageDataQuery, comment.ImageID)
 	batch.Queue(commenterInfoQuery, comment.UserID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err = batchResults.QueryRow().Scan(&comment.ImageOwner, &comment.AlbumID, &comment.AlbumName)
 	if err != nil {
@@ -877,12 +912,13 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, ui
 	if err != nil {
 		log.Print(err)
 	}
+	defer imageResponse.Close()
 
 	//Scan through images in album
 	for imageResponse.Next() {
 		var image m.Image
 
-		err := imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
+		err = imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
 			&image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)

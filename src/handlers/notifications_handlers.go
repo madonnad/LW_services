@@ -148,6 +148,13 @@ func QueryFriendRequests(ctx context.Context, w http.ResponseWriter, connPool *m
 	batch.Queue(pendingFriendRequests, uid)
 	batch.Queue(acceptedFriendRequests, uid)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	pendingRows, err := batchResults.Query()
 	if err != nil {

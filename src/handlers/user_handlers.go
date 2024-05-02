@@ -183,6 +183,13 @@ func GETUserByUID(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	// Execute the batch
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	// Query the Name Results
 	row := batchResults.QueryRow()

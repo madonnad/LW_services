@@ -53,6 +53,13 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	batch.Queue(requestQuery, senderID, friendRequest.ReceiverID)
 	batch.Queue(senderInfoQuery, senderID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err := batchResults.QueryRow().Scan(&friendRequest.RequestID, &friendRequest.ReceivedAt)
 	if err != nil {

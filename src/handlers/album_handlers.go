@@ -21,6 +21,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			log.Printf("Failed to get validated claims")
 			return
 		}
+		log.Print("Album Endpoint Handler")
 
 		switch r.Method {
 		case http.MethodGet:
@@ -66,6 +67,13 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	batch.Queue(albumQuery, albumID)
 	batch.Queue(guestQuery, albumID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err := batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
 		&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
@@ -73,7 +81,9 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		log.Print(err)
 		return
 	}
+
 	QueryImagesData(ctx, connPool, &album, authZeroID)
+
 	guestRows, err := batchResults.Query()
 	if err != nil {
 		log.Print(err)
@@ -105,7 +115,11 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(responseBytes)
+	_, err = w.Write(responseBytes)
+	if err != nil {
+		log.Printf("Failed to Write: %v", err)
+		return
+	}
 }
 
 func GETAlbumImagesByID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context, authZeroID string) {

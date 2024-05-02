@@ -83,6 +83,13 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	batch.Queue(albumInfoQuery, notification.AlbumID)
 	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err = batchResults.QueryRow().Scan(&notification.GuestID, &notification.GuestFirst, &notification.GuestLast)
 	if err != nil {
@@ -178,6 +185,13 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	batch.Queue(userInfoQuery, authZeroID)
 	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
+	defer func() {
+		err := batchResults.Close()
+		if err != nil {
+			log.Printf("%v", err)
+			return
+		}
+	}()
 
 	err = batchResults.QueryRow().Scan(&wsPayload.UserID)
 	if err != nil {

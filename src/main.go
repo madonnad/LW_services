@@ -4,13 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
 	middleware "last_weekend_services/src/middleware"
+	"log"
+	"net/http"
+	"os"
 
 	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
