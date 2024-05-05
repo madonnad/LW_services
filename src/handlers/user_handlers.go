@@ -60,9 +60,9 @@ func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	query := `INSERT INTO users (first_name, last_name, auth_zero_id) VALUES ($1, $2, $3) RETURNING user_id`
+	query := `INSERT INTO users (first_name, last_name, auth_zero_id, email) VALUES ($1, $2, $3, $4) RETURNING user_id`
 
-	result := connPool.Pool.QueryRow(ctx, query, user.FirstName, user.LastName, authZeroId)
+	result := connPool.Pool.QueryRow(ctx, query, user.FirstName, user.LastName, authZeroId, &user.Email)
 	err = result.Scan(&uid)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create new user entry")

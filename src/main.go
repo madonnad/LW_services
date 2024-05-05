@@ -1,20 +1,19 @@
 package main
 
 import (
+	"cloud.google.com/go/storage"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/gorilla/mux"
+	opensearch "github.com/opensearch-project/opensearch-go"
+	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
 	middleware "last_weekend_services/src/middleware"
 	"log"
 	"net/http"
 	"os"
-
-	"cloud.google.com/go/storage"
-	"github.com/gorilla/mux"
-	opensearch "github.com/opensearch-project/opensearch-go"
-	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -35,10 +34,19 @@ func main() {
 
 	// Redis Initialization
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
+		Addr:     "redis-19194.c280.us-central1-2.gce.redns.redis-cloud.com:19194",
+		Username: "default",
+		Password: "hYDyFSQnFXM8sXprxo576KfmqSxGg4MH",
 		DB:       0,
 	})
+
+	//go func() {
+	//	for {
+	//		time.Sleep(time.Second * 2)
+	//		connCount := rdb.PoolStats().TotalConns
+	//		log.Printf("%v", connCount)
+	//	}
+	//}()
 
 	// GCP Storage Initialization
 	gcpStorage, err := storage.NewClient(ctx)

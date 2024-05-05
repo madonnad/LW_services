@@ -21,7 +21,6 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			log.Printf("Failed to get validated claims")
 			return
 		}
-		log.Print("Album Endpoint Handler")
 
 		switch r.Method {
 		case http.MethodGet:
