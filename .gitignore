@@ -1,4 +1,4 @@
 /volumes
 /.idea
 /opensearch
-.env
+src/.env

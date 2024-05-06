@@ -13,37 +13,26 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 )
 
 func main() {
 	ctx := context.Background()
 
-	dir, err := os.Getwd()
+	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error getting working directory")
+		log.Fatal(err)
 	}
 
-	parentDir := filepath.Dir(dir)
-
-	err = godotenv.Load(filepath.Join(parentDir, ".env"))
+	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-		log.Printf("defaulting to port %s", port)
+		port = 8080
+		log.Printf("defaulting to port %v", port)
 	}
 
 	// Postgres Config Vals
 	//dbHost := os.Getenv("DB_HOST")
-	unixSocketPath, err := strconv.Atoi(os.Getenv("INSTANCE_UNIX_SOCKET"))
-	if err != nil {
-		log.Fatal("Error getting unix socket path")
-	}
+	unixSocketPath := os.Getenv("INSTANCE_UNIX_SOCKET")
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_NAME")
@@ -55,6 +44,7 @@ func main() {
 	rdbNo, err := strconv.Atoi(os.Getenv("RDB_NO"))
 	if err != nil {
 		rdbNo = 0
+		log.Printf("defaulting to db %v", rdbNo)
 	}
 
 	// Postgres Initialization
@@ -78,7 +68,7 @@ func main() {
 	// GCP Storage Initialization
 	gcpStorage, err := storage.NewClient(ctx)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 
 	//Server Starting String
