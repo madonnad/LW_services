@@ -4,19 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-	"strings"
-
-	"github.com/opensearch-project/opensearch-go"
-	"github.com/opensearch-project/opensearch-go/opensearchapi"
+	"regexp"
 	/*jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/redis/go-redis/v9"*/)
 
-func SearchEndpointHandler(ctx context.Context, connPool *m.PGPool, openSearchClient *opensearch.Client) http.Handler {
+func SearchEndpointHandler(ctx context.Context, connPool *m.PGPool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		/*claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -27,84 +23,42 @@ func SearchEndpointHandler(ctx context.Context, connPool *m.PGPool, openSearchCl
 		switch r.Method {
 		case http.MethodGet:
 			searchVal := r.URL.Query().Get("lookup")
-			AlbumFriendTextSearch(ctx, w, connPool, openSearchClient, searchVal)
+			AlbumFriendTextSearch(ctx, w, connPool, searchVal)
 		}
 	})
 }
 
-func AlbumFriendTextSearch(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, openSearchClient *opensearch.Client, searchVal string) {
+func AlbumFriendTextSearch(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, searchVal string) {
 	var results []m.Search
-	var openSearchResults m.SearchResults
 
-	size := 10
-	const IndexName = "global-search"
+	queryData := `SELECT user_id, first_name, last_name, ts_rank(users.tsv_fullname, 
+							to_tsquery($1)) + ts_rank(users.tsv_email,to_tsquery($1)) as rank
+					FROM users
+					WHERE setweight(users.tsv_fullname, 'A') || setweight(users.tsv_email, 'B') @@ to_tsquery($1)`
 
-	queryData := map[string]interface{}{
-		"size": size,
-		"query": map[string]interface{}{
-			"multi_match": map[string]interface{}{
-				"query":    searchVal,
-				"fields":   []string{"name^4", "first_name", "last_name"},
-				"type":     "bool_prefix",
-				"analyzer": "simple",
-			},
-		},
-	}
+	// Prepare string for the search
+	pattern := regexp.MustCompile(`\s+$`)
+	searchString := pattern.ReplaceAllString(searchVal, ":* & ")
+	searchString += ":*"
 
-	jsonData, err := json.Marshal(queryData)
+	rows, err := connPool.Pool.Query(ctx, queryData, searchString)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(w, "Failed to perform search: %v", err)
 	}
 
-	content := strings.NewReader(string(jsonData))
-
-	search := opensearchapi.SearchRequest{
-		Index:  []string{IndexName},
-		Body:   content,
-		Pretty: true,
-	}
-
-	searchResponse, err := search.Do(ctx, openSearchClient)
-	if err != nil {
-		fmt.Fprintf(w, "Failed to lookup search: %v", err)
-	}
-
-	bytes, err := io.ReadAll(searchResponse.Body)
-	if err != nil {
-		fmt.Fprintf(w, "Failed with: %v", err)
-	}
-
-	err = json.Unmarshal(bytes, &openSearchResults)
-	if err != nil {
-		fmt.Fprintf(w, "Unable to parse JSON: %v", err)
-	}
-
-	//log.Printf("Result: %v", openSearchResults.Hits.Hits)
-
-	for _, value := range openSearchResults.Hits.Hits {
+	// Scan through the rows of search results
+	for rows.Next() {
 		var result m.Search
-		result.ID = value.ID
-		result.Score = value.Score
-		result.Name = value.Source.Name
-		result.FirstName = value.Source.FirstName
-		result.LastName = value.Source.LastName
-		result.ResultType = value.Source.ResultType
 
-		switch value.Source.ResultType {
-		case "user":
-			result.Asset = value.ID
-		case "album":
-			queryCover := `SELECT album_cover_id FROM albums WHERE album_id=$1`
-
-			row := connPool.Pool.QueryRow(ctx, queryCover, value.ID)
-			err := row.Scan(&result.Asset)
-			if err != nil {
-				fmt.Fprintf(w, "Unable to find AlbumCoverID: %v", err)
-				result.Asset = ""
-			}
+		err = rows.Scan(&result.ID, &result.FirstName, &result.LastName, &result.Score)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to scan search: %v", err)
 		}
-		results = append(results, result)
+		result.Name = result.FirstName + result.LastName
+		result.Asset = result.ID
+		result.ResultType = "user"
 
+		results = append(results, result)
 	}
 
 	responseBytes, err := json.MarshalIndent(results, "", "\t")
