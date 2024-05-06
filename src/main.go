@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/mux"
-	"github.com/lpernett/godotenv"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
@@ -18,11 +17,6 @@ import (
 
 func main() {
 	ctx := context.Background()
-
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
