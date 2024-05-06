@@ -32,6 +32,12 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+		log.Printf("defaulting to port %s", port)
+	}
+
 	// Postgres Config Vals
 	//dbHost := os.Getenv("DB_HOST")
 	unixSocketPath, err := strconv.Atoi(os.Getenv("INSTANCE_UNIX_SOCKET"))
@@ -76,8 +82,7 @@ func main() {
 	}
 
 	//Server Starting String
-	host := "127.0.0.1"
-	port := "8080"
+	host := "0.0.0.0"
 	serverString := fmt.Sprintf("%v:%v", host, port)
 
 	r := mux.NewRouter()
