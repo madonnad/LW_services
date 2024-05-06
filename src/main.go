@@ -5,28 +5,55 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/lpernett/godotenv"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
-	middleware "last_weekend_services/src/middleware"
+	"last_weekend_services/src/middleware"
 	"log"
 	"net/http"
 	"os"
-)
-
-const (
-	host     = "127.0.0.1"
-	port     = 3306
-	user     = "dmadonna"
-	password = ""
-	dbname   = "postgres"
+	"path/filepath"
+	"strconv"
 )
 
 func main() {
 	ctx := context.Background()
 
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal("Error getting working directory")
+	}
+
+	parentDir := filepath.Dir(dir)
+
+	err = godotenv.Load(filepath.Join(parentDir, ".env"))
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Postgres Config Vals
+	dbHost := os.Getenv("DB_HOST")
+	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
+	if err != nil {
+		dbPort = 3306
+	}
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
+
+	// Redis Config Vals
+	rdbAddr := os.Getenv("RDB_ADDR")
+	rdbUser := os.Getenv("RDB_USER")
+	rdbPassword := os.Getenv("RDB_PASSWORD")
+	rdbNo, err := strconv.Atoi(os.Getenv("RDB_NO"))
+	if err != nil {
+		rdbNo = 0
+	}
+
 	// Postgres Initialization
-	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v", user, password, host, port, dbname)
+	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v",
+		dbUser, dbPassword, dbHost, dbPort, dbName)
 	connPool, err := i.CreatePostgresPool(connString, ctx)
 	if err != nil {
 		fmt.Println("cannot get postgres instance:", err)
@@ -36,19 +63,11 @@ func main() {
 
 	// Redis Initialization
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "redis-19194.c280.us-central1-2.gce.redns.redis-cloud.com:19194",
-		Username: "default",
-		Password: "hYDyFSQnFXM8sXprxo576KfmqSxGg4MH",
-		DB:       0,
+		Addr:     rdbAddr,
+		Username: rdbUser,
+		Password: rdbPassword,
+		DB:       rdbNo,
 	})
-
-	//go func() {
-	//	for {
-	//		time.Sleep(time.Second * 2)
-	//		connCount := rdb.PoolStats().TotalConns
-	//		log.Printf("%v", connCount)
-	//	}
-	//}()
 
 	// GCP Storage Initialization
 	gcpStorage, err := storage.NewClient(ctx)
@@ -81,8 +100,8 @@ func main() {
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                    // Protected
-	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx, openSearchClient))).Methods("GET", "POST")                  // Protected
-	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx, openSearchClient))).Methods("GET")                       // Protected
+	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET", "POST")                                    // Protected
+	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET")                                         // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                  // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                               // Protected
