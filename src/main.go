@@ -3,10 +3,8 @@ package main
 import (
 	"cloud.google.com/go/storage"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"github.com/gorilla/mux"
-	opensearch "github.com/opensearch-project/opensearch-go"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
@@ -17,11 +15,11 @@ import (
 )
 
 const (
-	host     = "0.0.0.0"
-	port     = 5432
+	host     = "127.0.0.1"
+	port     = 3306
 	user     = "dmadonna"
-	password = "1425"
-	dbname   = "lw_db"
+	password = ""
+	dbname   = "postgres"
 )
 
 func main() {
@@ -29,7 +27,11 @@ func main() {
 
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v", user, password, host, port, dbname)
-	connPool, _ := i.CreatePostgresPool(connString, ctx)
+	connPool, err := i.CreatePostgresPool(connString, ctx)
+	if err != nil {
+		fmt.Println("cannot get postgres instance:", err)
+		os.Exit(1)
+	}
 	defer connPool.Pool.Close()
 
 	// Redis Initialization
@@ -54,25 +56,6 @@ func main() {
 		log.Panic(err)
 	}
 
-	// Opensearch Initialization
-	openSearchClient, err := opensearch.NewClient(opensearch.Config{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		Addresses: []string{"https://localhost:9200"},
-		Username:  "admin", // For testing only. Don't store credentials in code.
-		Password:  "admin"})
-	if err != nil {
-		fmt.Println("cannot initialize", err)
-		os.Exit(1)
-	}
-	//log.Printf("OpenSearch Client Connected: %v", openSearchClient.Info)
-
-	// ---------------------------------------------------------------------------------------
-	// Only need the InitOpenSearch to run if we need to repopulate OpenSearch with the DB data
-	// i.InitOpenSearch(ctx, connPool, openSearchClient)
-	// ---------------------------------------------------------------------------------------
-
 	//Server Starting String
 	host := "0.0.0.0"
 	port := "2525"
@@ -86,7 +69,7 @@ func main() {
 	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                       // Unprotected
 	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                   // Protected
 	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                             // Protected
-	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool, openSearchClient))).Methods("GET")                      // Protected
+	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool))).Methods("GET")                                        // Protected
 	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
 	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                     // Protected
 	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE")  // Protected
