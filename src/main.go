@@ -33,10 +33,10 @@ func main() {
 	}
 
 	// Postgres Config Vals
-	dbHost := os.Getenv("DB_HOST")
-	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
+	//dbHost := os.Getenv("DB_HOST")
+	unixSocketPath, err := strconv.Atoi(os.Getenv("INSTANCE_UNIX_SOCKET"))
 	if err != nil {
-		dbPort = 3306
+		log.Fatal("Error getting unix socket path")
 	}
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
@@ -52,8 +52,8 @@ func main() {
 	}
 
 	// Postgres Initialization
-	connString := fmt.Sprintf("user=%v password=%v host=%v port=%v dbname=%v",
-		dbUser, dbPassword, dbHost, dbPort, dbName)
+	connString := fmt.Sprintf("user=%v password=%v host=%v dbname=%v",
+		dbUser, dbPassword, unixSocketPath, dbName)
 	connPool, err := i.CreatePostgresPool(connString, ctx)
 	if err != nil {
 		fmt.Println("cannot get postgres instance:", err)
