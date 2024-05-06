@@ -2,3 +2,5 @@
 /.idea
 /opensearch
 docker-compose.yml
+.env
+

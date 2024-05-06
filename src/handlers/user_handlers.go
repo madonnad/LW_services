@@ -6,20 +6,15 @@ import (
 	"fmt"
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
-	"github.com/opensearch-project/opensearch-go"
-	"github.com/opensearch-project/opensearch-go/opensearchapi"
 	"io"
+	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
-	"os"
-	"strings"
-
-	m "last_weekend_services/src/models"
 
 	"github.com/jackc/pgx/v5"
 )
 
-func UserEndpointHandler(connPool *m.PGPool, ctx context.Context, osClient *opensearch.Client) http.HandlerFunc {
+func UserEndpointHandler(connPool *m.PGPool, ctx context.Context) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -29,7 +24,7 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context, osClient *open
 
 		switch r.Method {
 		case http.MethodPost:
-			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject, osClient)
+			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 		case http.MethodGet:
 			switch r.URL.Path {
 			case "/user":
@@ -41,7 +36,7 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context, osClient *open
 	})
 }
 
-func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authZeroId string, osClient *opensearch.Client) {
+func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authZeroId string) {
 	var user m.User
 	var uid string
 
@@ -71,28 +66,6 @@ func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		log.Printf("Unable to create new user entry: %v", err)
 		return
 	}
-
-	// Add to OpenSearch Database
-	// Prepare - Prepare struct to be added to opensearch
-	name := fmt.Sprintf("%s %s", user.FirstName, user.CreatedAt)
-	osUser := m.Search{ID: uid, Name: name, FirstName: user.FirstName, LastName: user.LastName, ResultType: "user"}
-
-	// Format the JSON Format to be Accepted
-	data, err := json.MarshalIndent(osUser, "", "\t")
-	document := strings.NewReader(string(data))
-
-	// Process Request
-	req := opensearchapi.IndexRequest{
-		Index:      "global-search",
-		DocumentID: osUser.ID,
-		Body:       document,
-	}
-	insertResponse, err := req.Do(ctx, osClient)
-	if err != nil {
-		fmt.Println("failed to insert document ", err)
-		os.Exit(1)
-	}
-	defer insertResponse.Body.Close()
 
 	// Send success to the client
 	responseBytes, err := json.MarshalIndent("account created - success", "", "\t")
