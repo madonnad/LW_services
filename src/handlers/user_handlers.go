@@ -83,7 +83,6 @@ func GETAuthUserInformation(w http.ResponseWriter, connPool *m.PGPool, uid strin
 
 	sqlQuery := "SELECT user_id, created_at, first_name, last_name FROM users WHERE auth_zero_id=$1"
 	response := connPool.Pool.QueryRow(context.Background(), sqlQuery, uid)
-
 	//fmt.Printf("%v", response.Scan())
 	err := response.Scan(&user.ID, &user.CreatedAt, &user.FirstName, &user.LastName)
 	if err != nil {

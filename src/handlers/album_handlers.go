@@ -425,7 +425,7 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 
 func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
 	query := `INSERT INTO album_requests (album_id, invited_id) 
-										VALUES ($1, $2) RETURNING request_id, invited_at, invite_seen, response_seen, status`
+										VALUES ($1, $2) RETURNING request_id, updated_at, invite_seen, response_seen, status`
 	var albumRequest = m.AlbumRequestNotification{
 		AlbumID:      album.AlbumID,
 		AlbumName:    album.AlbumName,
