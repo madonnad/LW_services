@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="LastWeekendRedis" uuid="d349dfbd-761a-4658-bd92-31929d68eb0f">
+    <data-source source="LOCAL" name="Local - LWRedis" uuid="d349dfbd-761a-4658-bd92-31929d68eb0f">
       <driver-ref>redis</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>jdbc.RedisDriver</jdbc-driver>
       <jdbc-url>jdbc:redis://localhost:6379/0</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
-    <data-source source="LOCAL" name="postgres@127.0.0.1" uuid="8fe637ad-6b93-4660-955c-15520d09995c">
+    <data-source source="LOCAL" name="CloudSQL - PG" uuid="8fe637ad-6b93-4660-955c-15520d09995c">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
