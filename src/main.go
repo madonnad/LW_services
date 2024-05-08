@@ -41,6 +41,13 @@ func main() {
 		log.Printf("defaulting to db %v", rdbNo)
 	}
 
+	// Auth0 Config Vals
+	authDomain := os.Getenv("AUTH0_DOMAIN")
+	authAudience := os.Getenv("AUTH0_AUDIENCE")
+
+	// GCP Storage Config Vals
+	storageBucket := os.Getenv("STORAGE_BUCKET")
+
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v dbname=%v",
 		dbUser, dbPassword, unixSocketPath, dbName)
@@ -71,7 +78,7 @@ func main() {
 
 	r := mux.NewRouter()
 
-	jwtMiddleware := middleware.EnsureValidToken()
+	jwtMiddleware := middleware.EnsureValidToken(authDomain, authAudience)
 
 	//Route Register
 	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                       // Unprotected
@@ -79,7 +86,7 @@ func main() {
 	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                             // Protected
 	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool))).Methods("GET")                                        // Protected
 	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
-	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                     // Protected
+	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                      // Protected
 	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE")  // Protected
 	r.Handle("/image/comment/seen", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("PATCH")                      // Protected
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
@@ -88,7 +95,7 @@ func main() {
 	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
-	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage))).Methods("GET")                                    // Protected
+	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                     // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET", "POST")                                    // Protected
 	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET")                                         // Protected
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
