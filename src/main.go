@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/mux"
-	"github.com/lpernett/godotenv"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
@@ -20,11 +19,11 @@ func main() {
 	ctx := context.Background()
 
 	// Remove when pushing commit - only for local testing
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("cannot get env variables:", err)
-		os.Exit(1)
-	}
+	//err := godotenv.Load()
+	//if err != nil {
+	//	fmt.Println("cannot get env variables:", err)
+	//	os.Exit(1)
+	//}
 
 	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
@@ -117,8 +116,8 @@ func main() {
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
-	err = http.ListenAndServeTLS(serverString, "/Users/dominickmadonna/.localhost-ssl/myCA.pem", "/Users/dominickmadonna/.localhost-ssl/myCA.key", r)
-	//err = http.ListenAndServe(serverString, r)
+	//err = http.ListenAndServeTLS(serverString, "/Users/dominickmadonna/.localhost-ssl/myCA.pem", "/Users/dominickmadonna/.localhost-ssl/myCA.key", r)
+	err = http.ListenAndServe(serverString, r)
 	if err != nil {
 		fmt.Printf("Error starting the server: %v\n", err)
 	}
