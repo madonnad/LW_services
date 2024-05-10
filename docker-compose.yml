@@ -1,4 +1,27 @@
 services:
+#  app:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    ports:
+#      - "2525:2525"
+#    depends_on:
+#      - postgres
+#      - redis
+#    environment:
+#      PORT: 2525
+#      DB_HOST: 127.0.0.1
+#      INSTANCE_UNIX_SOCKET:  127.0.0.1:2525
+#      DB_USER: "dmadonna"
+#      DB_PASSWORD: "1425"
+#      RDB_ADDR: "localhost:6379"
+#      RDB_USER: "default"
+#      RDB_PASSWORD: ""
+#      RDB_NO: 0
+#      AUTH0_DOMAIN: "dev-dtwzinh2v8hlmwqm.us.auth0.com"
+#      AUTH0_AUDIENCE: "http://localhost:2525/go_services"
+#      STORAGE_BUCKET: "lw-user-images"
+
   postgres:
     image: postgres:16.0
     restart: always
@@ -11,39 +34,12 @@ services:
     volumes:
       - ./volumes/postgres:/var/lib/postgresql/data
 
+
   redis:
     image: redis:latest
     ports:
       - 6379:6379
 
-  opensearch-node1:
-    image: opensearchproject/opensearch:latest
-    container_name: opensearch-node1
-    environment:
-      - discovery.type=single-node
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
-        hard: 65536
-    volumes:
-      - ./volumes/opensearch/opensearch-data1:/usr/share/opensearch/data
-    ports:
-      - 9200:9200
-      - 9600:9600 # required for Performance Analyzer
 
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest
-    container_name: opensearch-dashboards
-    ports:
-      - 5601:5601
-    expose:
-      - "5601"
-    environment:
-      OPENSEARCH_HOSTS: '["https://opensearch-node1:9200"]'
 
 
