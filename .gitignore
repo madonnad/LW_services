@@ -2,3 +2,5 @@
 /.idea
 /opensearch
 src/.env
+src/go-server.crt
+src/go-server.key

@@ -11,6 +11,6 @@ COPY . .
 
 RUN go build -o lwServicesBuild ./src
 
-EXPOSE 2626
+EXPOSE 2525
 
 CMD ["./lwServicesBuild"]
