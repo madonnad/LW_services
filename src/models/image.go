@@ -12,6 +12,7 @@ type Image struct {
 	Caption     string    `json:"caption"`
 	Upvotes     uint      `json:"upvotes"`
 	Likes       uint      `json:"likes"`
+	UploadType  string    `json:"upload_type"`
 	UserUpvoted bool      `json:"user_upvoted"`
 	UserLiked   bool      `json:"user_liked"`
 	CreatedAt   time.Time `json:"created_at"`
