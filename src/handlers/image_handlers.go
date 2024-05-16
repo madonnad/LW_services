@@ -889,6 +889,14 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
+	getUploaderData := `SELECT first_name, last_name, user_id FROM users WHERE auth_zero_id=$1`
+	err = connPool.Pool.QueryRow(ctx, getUploaderData, image.ImageOwner).Scan(&image.FirstName, &image.LastName, &image.ImageOwner)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to get uploader data")
+		log.Printf("Unable to get uploader data: %v", err)
+		return
+	}
+
 	insertResponse, err := json.MarshalIndent(image, "", "\t")
 	if err != nil {
 		log.Print(err)
