@@ -42,6 +42,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		Type:      "friend-request",
 		UserID:    friendRequest.ReceiverID,
 	}
+	log.Print("Friend Request Start")
 
 	// Create SQL entry to add request to friend request table
 	requestQuery := `INSERT INTO friend_requests (sender_id, receiver_id) 
@@ -60,6 +61,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}()
+	log.Print("Friend Request - Queries Made")
 
 	err := batchResults.QueryRow().Scan(&friendRequest.RequestID, &friendRequest.ReceivedAt)
 	if err != nil {
@@ -68,12 +70,16 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	log.Print("Friend Request - First Batch")
+
 	err = batchResults.QueryRow().Scan(&friendRequest.SenderID, &friendRequest.FirstName, &friendRequest.LastName)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Unable to lookup requesting user")
 		log.Printf("Unable to lookup requesting user: %v", err)
 		return
 	}
+
+	log.Print("Friend Request - Second Batch")
 
 	wsPayload.Payload = friendRequest
 
@@ -87,6 +93,8 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		log.Print(err)
 	}
+
+	log.Print("Friend Request - Published")
 
 	//Respond to the calling user that the action was successful
 	responseBytes, err := json.MarshalIndent("friend request sent - success", "", "\t")

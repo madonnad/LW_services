@@ -316,8 +316,8 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	}
 
 	newImageQuery := `INSERT INTO images
-					  (image_owner, caption)
-					  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2) RETURNING image_id`
+					  (image_owner, caption, upload_type)
+					  VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2, 'album_cover') RETURNING image_id`
 
 	err = connPool.Pool.QueryRow(ctx, newImageQuery, uid, album.AlbumName).Scan(&album.AlbumCoverID)
 	if err != nil {

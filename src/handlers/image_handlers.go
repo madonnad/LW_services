@@ -737,7 +737,7 @@ func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Req
 	var images []m.Image
 
 	query := `
-			SELECT image_id, image_owner, caption, upvotes, created_at
+			SELECT image_id, image_owner, caption, upload_type, created_at
 			FROM images
 			WHERE image_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1);`
 	result, err := connPool.Pool.Query(ctx, query, uid)
@@ -747,7 +747,7 @@ func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Req
 
 	for result.Next() {
 		var image m.Image
-		err := result.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
+		err := result.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.UploadType, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
 		}
@@ -860,13 +860,20 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 			} else {
 				fmt.Println("Value is not a string")
 			}
+		case "upload_type":
+			if uploadType, ok := value.(string); ok {
+				image.UploadType = uploadType
+			} else {
+				fmt.Println("Value is not a string")
+			}
 		}
 	}
 
 	imageCreationQuery := `INSERT INTO images
-			  (image_owner, caption) VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2)
+			  (image_owner, caption, upload_type) VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2, $3)
 			  RETURNING image_id, created_at`
-	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ImageOwner, image.Caption).Scan(&image.ID, &image.CreatedAt)
+	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ImageOwner, image.Caption,
+		image.UploadType).Scan(&image.ID, &image.CreatedAt)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create image in database")
 		log.Printf("Unable to create image in database: %v", err)
@@ -882,6 +889,14 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
+	getUploaderData := `SELECT first_name, last_name, user_id FROM users WHERE auth_zero_id=$1`
+	err = connPool.Pool.QueryRow(ctx, getUploaderData, image.ImageOwner).Scan(&image.FirstName, &image.LastName, &image.ImageOwner)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to get uploader data")
+		log.Printf("Unable to get uploader data: %v", err)
+		return
+	}
+
 	insertResponse, err := json.MarshalIndent(image, "", "\t")
 	if err != nil {
 		log.Print(err)
@@ -894,7 +909,7 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 }
 
 func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, uid string) {
-	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption,
+	imageQuery := `SELECT i.image_id, i.image_owner, u.first_name, u.last_name, i.caption, i.upload_type,
                       (SELECT COUNT(*) FROM likes l WHERE l.image_id = i.image_id) AS like_count,
                       (SELECT COUNT(*) FROM upvotes up WHERE up.image_id = i.image_id) AS upvote_count,
                       EXISTS (SELECT 1 FROM likes l WHERE l.image_id = i.image_id AND l.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2)) AS user_has_liked,
@@ -919,7 +934,7 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, ui
 		var image m.Image
 
 		err = imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
-			&image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CreatedAt)
+			&image.UploadType, &image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CreatedAt)
 		if err != nil {
 			log.Print(err)
 		}
