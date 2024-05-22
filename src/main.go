@@ -3,8 +3,10 @@ package main
 import (
 	"cloud.google.com/go/storage"
 	"context"
+	firebase "firebase.google.com/go/v4"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/lpernett/godotenv"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
@@ -19,11 +21,11 @@ func main() {
 	ctx := context.Background()
 
 	// Remove when pushing commit - only for local testing
-	//err := godotenv.Load()
-	//if err != nil {
-	//	fmt.Println("cannot get env variables:", err)
-	//	os.Exit(1)
-	//}
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("cannot get env variables:", err)
+		os.Exit(1)
+	}
 
 	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
@@ -79,8 +81,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//account, _ := gcpStorage.ServiceAccount(ctx, "lastweekend")
-	//log.Printf("%v", account)
+	// Initialize Firebase SDK
+	config := firebase.Config{
+		ProjectID: "lastweekend",
+	}
+	app, err := firebase.NewApp(ctx, &config)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Initialize Firebase Messaging
+	_, err = app.Messaging(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	//Server Starting String
 	host := "0.0.0.0"
