@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// Initialize Firebase Messaging
-	_, err = app.Messaging(ctx)
+	messagingClient, err := app.Messaging(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -115,14 +115,14 @@ func main() {
 	r.Handle("/image/comment/seen", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("PATCH")                      // Protected
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                   // Protected
-	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                                     // Protected
-	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
-	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
-	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
+	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")                    // Protected
+	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")             // Protected
+	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")           // Protected
+	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")             // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                     // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET", "POST")                                    // Protected
 	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET")                                         // Protected
-	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
+	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET", "POST")       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                  // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                               // Protected
 	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
@@ -130,6 +130,7 @@ func main() {
 	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE", "PATCH") // Protected
 	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE", "PATCH")            // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET", "PATCH")            // Protected
+	r.Handle("/fcm", jwtMiddleware(h.FirebaseHandlers(connPool, ctx))).Methods("PUT")
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
