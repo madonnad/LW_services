@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"firebase.google.com/go/v4/messaging"
 	"github.com/jackc/pgx/v5"
 	"io"
 	m "last_weekend_services/src/models"
@@ -14,7 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context) http.Handler {
+func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context, messagingClient *messaging.Client) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -38,7 +39,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 
 		case http.MethodPost:
-			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
 		}
 	})
 }
@@ -297,7 +298,7 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	w.Write(responseBytes)
 }
 
-func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string) {
+func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, uid string, messagingClient *messaging.Client) {
 	album := m.Album{}
 
 	bytes, err := io.ReadAll(r.Body)
@@ -350,7 +351,15 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
-	err = SendAlbumRequests(ctx, &album, album.InviteList, rdb, connPool)
+	getOwnerDetailsQuery := `SELECT first_name, last_name FROM users WHERE auth_zero_id=$1`
+	err = connPool.Pool.QueryRow(ctx, getOwnerDetailsQuery, uid).Scan(&album.OwnerFirst, &album.OwnerLast)
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
+		log.Printf("Unable to create entry in albums table for new album: %v", err)
+		return
+	}
+
+	err = SendAlbumRequests(ctx, &album, album.InviteList, rdb, connPool, messagingClient)
 	if err != nil {
 		log.Printf("Sending album requests failed with error: %v", err)
 		return
@@ -423,7 +432,7 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 	w.Write(responseBytes)
 }
 
-func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool) error {
+func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool, messagingClient *messaging.Client) error {
 	query := `INSERT INTO album_requests (album_id, invited_id) 
 										VALUES ($1, $2) RETURNING request_id, updated_at, invite_seen, response_seen, status`
 	var albumRequest = m.AlbumRequestNotification{
@@ -434,6 +443,14 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		OwnerFirst:   album.OwnerFirst,
 		OwnerLast:    album.OwnerLast,
 		UnlockedAt:   album.UnlockedAt,
+	}
+
+	var fcmNotification = m.FirebaseNotification{
+		NotificationID: album.AlbumID,
+		ContentName:    album.AlbumName,
+		RequesterID:    album.AlbumOwner,
+		RequesterName:  album.OwnerFirst,
+		Type:           "album-invite",
 	}
 
 	for _, user := range invited {
@@ -460,6 +477,13 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		}
 
 		err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+		if err != nil {
+			log.Print(err)
+		}
+
+		fcmNotification.RecipientID = user.ID
+
+		err = SendFirebaseMessageToUID(ctx, connPool, messagingClient, fcmNotification)
 		if err != nil {
 			log.Print(err)
 		}

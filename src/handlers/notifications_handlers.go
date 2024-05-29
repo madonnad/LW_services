@@ -72,7 +72,7 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 						JOIN users u ON u.user_id = a.album_owner
 						JOIN users u2 ON ar.invited_id = u2.user_id
 						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-						AND (ar.status = 'pending' OR ar.status ='accepted')`
+						AND (ar.status = 'pending' OR (ar.status ='accepted') AND a.unlocked_at > now() AT TIME ZONE 'utc')`
 
 	rows, err := connPool.Pool.Query(ctx, queryAlbumInvites, uid)
 	if err != nil {

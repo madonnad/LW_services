@@ -3,6 +3,7 @@ package main
 import (
 	"cloud.google.com/go/storage"
 	"context"
+	firebase "firebase.google.com/go/v4"
 	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
@@ -79,8 +80,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//account, _ := gcpStorage.ServiceAccount(ctx, "lastweekend")
-	//log.Printf("%v", account)
+	// Initialize Firebase SDK
+	config := firebase.Config{
+		ProjectID: "lastweekend",
+	}
+	app, err := firebase.NewApp(ctx, &config)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Initialize Firebase Messaging
+	messagingClient, err := app.Messaging(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	//Server Starting String
 	host := "0.0.0.0"
@@ -101,14 +114,14 @@ func main() {
 	r.Handle("/image/comment/seen", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("PATCH")                      // Protected
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                   // Protected
-	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                                     // Protected
-	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
-	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                            // Protected
-	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET")                              // Protected
+	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")                    // Protected
+	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")             // Protected
+	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")           // Protected
+	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")             // Protected
 	r.Handle("/upload", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                     // Protected
 	r.Handle("/user", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET", "POST")                                    // Protected
 	r.Handle("/user/id", jwtMiddleware(h.UserEndpointHandler(connPool, ctx))).Methods("GET")                                         // Protected
-	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
+	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET", "POST")       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                  // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                               // Protected
 	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
@@ -116,6 +129,7 @@ func main() {
 	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE", "PATCH") // Protected
 	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE", "PATCH")            // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET", "PATCH")            // Protected
+	r.Handle("/fcm", jwtMiddleware(h.FirebaseHandlers(connPool, ctx))).Methods("PUT")
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)
