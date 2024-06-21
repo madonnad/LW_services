@@ -40,6 +40,8 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				PATCHImageComment(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/image/comment/seen":
 				PATCHCommentSeen(ctx, w, r, connPool)
+			case "/user/image":
+				PATCHUpdateImageAlbum(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
 
 		case http.MethodGet:
@@ -906,6 +908,49 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func PATCHUpdateImageAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	imageID := r.URL.Query().Get("image_id")
+	albumID := r.URL.Query().Get("album_id")
+
+	log.Print(imageID)
+	log.Print(albumID)
+	log.Print(uid)
+
+	updateQuery := `UPDATE imagealbum AS ia
+					SET album_id = $1
+					FROM images AS i, albums AS a
+					WHERE ia.image_id = i.image_id
+					AND ia.album_id = a.album_id
+					AND ia.image_id = $2
+					AND a.revealed_at > NOW() AT TIME ZONE 'UTC'
+					AND i.image_owner = (SELECT user_id FROM users WHERE auth_zero_id=$3)`
+
+	tag, err := connPool.Pool.Exec(ctx, updateQuery, albumID, imageID, uid)
+	if err != nil {
+		responseBytes := []byte("Error attempting to change image album\"")
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+		return
+	}
+
+	if tag.RowsAffected() == 0 {
+		responseBytes := []byte("Couldn't update album")
+
+		w.WriteHeader(403)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+		return
+	}
+
+	responseBytes := []byte("Success updating album")
+
+	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
+	w.Write(responseBytes)
+
 }
 
 func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, uid string) {

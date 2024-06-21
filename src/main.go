@@ -6,6 +6,7 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/lpernett/godotenv"
 	"github.com/redis/go-redis/v9"
 	h "last_weekend_services/src/handlers"
 	i "last_weekend_services/src/inits"
@@ -20,11 +21,11 @@ func main() {
 	ctx := context.Background()
 
 	// Remove when pushing commit - only for local testing
-	//err := godotenv.Load()
-	//if err != nil {
-	//	fmt.Println("cannot get env variables:", err)
-	//	os.Exit(1)
-	//}
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("cannot get env variables:", err)
+		os.Exit(1)
+	}
 
 	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
@@ -124,7 +125,7 @@ func main() {
 	r.Handle("/user/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET", "POST")       // Protected
 	r.Handle("/user/album/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                  // Protected
 	r.Handle("/user/recap", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST")                               // Protected
-	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST")                        // Protected
+	r.Handle("/user/image", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH")               // Protected
 	r.Handle("/user/friend", jwtMiddleware(h.FriendEndpointHandler(ctx, connPool, rdb))).Methods("GET", "DELETE")                    // Protected
 	r.Handle("/friend-request", jwtMiddleware(h.FriendRequestHandler(ctx, connPool, rdb))).Methods("POST", "PUT", "DELETE", "PATCH") // Protected
 	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE", "PATCH")            // Protected
