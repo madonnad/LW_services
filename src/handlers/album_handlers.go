@@ -39,7 +39,13 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 
 		case http.MethodPost:
-			POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
+			switch r.URL.Path {
+			case "/user/album":
+				POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
+			case "/album/guests":
+				InviteUserToAlbum(ctx, w, r, rdb, connPool, messagingClient)
+			}
+
 		}
 	})
 }
@@ -467,7 +473,7 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 			return err
 		}
 		wsPayload.Operation = "REQUEST"
-		wsPayload.Type = "album-request"
+		wsPayload.Type = "album-invite"
 		wsPayload.UserID = user.ID
 		wsPayload.Payload = albumRequest
 
@@ -490,4 +496,103 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 	}
 
 	return nil
+}
+
+func InviteUserToAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, rdb *redis.Client, connPool *m.PGPool, messagingClient *messaging.Client) {
+	var albumRequest m.AlbumRequestNotification
+
+	// Get Information from Request
+	albumRequest.GuestID = r.URL.Query().Get("guest_id")
+	albumRequest.AlbumID = r.URL.Query().Get("album_id")
+
+	// Batch Request Query for Stored Information
+	albumInfoRequestQuery := `SELECT album_name, album_cover_id, unlocked_at FROM albums WHERE album_id = $1`
+	getGuestInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
+	getRequesterInfoQuery := `SELECT first_name, last_name FROM users WHERE user_id = $1`
+
+	// Create Album Request Query
+	insertInviteQuery := `INSERT INTO album_requests (album_id, invited_id) 
+										VALUES ($1, $2) RETURNING request_id, updated_at, invite_seen, response_seen, status`
+
+	// Process Batch
+	batch := &pgx.Batch{}
+	batch.Queue(albumInfoRequestQuery, albumRequest.AlbumID)
+	batch.Queue(getGuestInfoQuery, albumRequest.GuestID)
+	batch.Queue(getRequesterInfoQuery, albumRequest.GuestID)
+	batchResults := connPool.Pool.SendBatch(ctx, batch)
+
+	// Scan Batch Results
+	err := batchResults.QueryRow().Scan(&albumRequest.AlbumName, &albumRequest.AlbumCoverID, &albumRequest.UnlockedAt)
+	err = batchResults.QueryRow().Scan(&albumRequest.GuestID, &albumRequest.GuestFirst, &albumRequest.GuestLast)
+	err = batchResults.QueryRow().Scan(&albumRequest.OwnerFirst, &albumRequest.OwnerFirst)
+	if err != nil {
+		log.Printf("Failure in batch: %v", err)
+		responseBytes := []byte(err.Error())
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+	}
+
+	// Execute Album Request Query
+	err = connPool.Pool.QueryRow(ctx, insertInviteQuery, albumRequest.AlbumID, albumRequest.GuestID).Scan(&albumRequest.RequestID,
+		&albumRequest.ReceivedAt, &albumRequest.InviteSeen, &albumRequest.ResponseSeen, &albumRequest.Status)
+	if err != nil {
+		log.Printf("Failed to add user to album request table: %v", err)
+		responseBytes := []byte(err.Error())
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+	}
+
+	// Assemble WS Payload Information
+	var wsPayload WebSocketPayload
+	wsPayload.Operation = "REQUEST"
+	wsPayload.Type = "album-invite"
+	wsPayload.UserID = albumRequest.GuestID
+	wsPayload.Payload = albumRequest
+
+	jsonPayload, err := json.MarshalIndent(wsPayload, "", "\t")
+	if err != nil {
+		log.Print(err)
+
+		responseBytes := []byte(err.Error())
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+	}
+
+	// Send to Notification Redis Channel
+	err = rdb.Publish(ctx, "notifications", jsonPayload).Err()
+	if err != nil {
+		log.Print(err)
+		responseBytes := []byte(err.Error())
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+	}
+
+	// Prepare Firebase Notification
+	var fcmNotification = m.FirebaseNotification{
+		RecipientID:    albumRequest.GuestID,
+		NotificationID: albumRequest.AlbumID,
+		ContentName:    albumRequest.AlbumName,
+		RequesterID:    albumRequest.AlbumOwner,
+		RequesterName:  albumRequest.OwnerFirst,
+		Type:           "album-invite",
+	}
+
+	// Send Firebase Notification
+	err = SendFirebaseMessageToUID(ctx, connPool, messagingClient, fcmNotification)
+	if err != nil {
+		log.Print(err)
+		responseBytes := []byte(err.Error())
+
+		w.WriteHeader(401)
+		w.Header().Set("Content-Type", "application/json") // add content length number of bytes
+		w.Write(responseBytes)
+	}
 }
