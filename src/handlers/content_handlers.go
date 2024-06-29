@@ -1,13 +1,15 @@
 package handlers
 
 import (
+	"bytes"
+	"cloud.google.com/go/storage"
 	"context"
+	"github.com/disintegration/imaging"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
-
-	"cloud.google.com/go/storage"
 )
 
 func ContentEndpointHandler(ctx context.Context, gcpStorage storage.Client, bucket string) http.Handler {
@@ -49,6 +51,7 @@ func GenerateAndSendSignedUrl(w http.ResponseWriter, r *http.Request, gcpStorage
 
 func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcpStorage storage.Client, bucket string) {
 	imageId := r.URL.Query().Get("id")
+	imageHeight := r.URL.Query().Get("height")
 
 	obj := gcpStorage.Bucket(bucket).Object(imageId)
 	imageReader, err := obj.NewReader(ctx)
@@ -56,10 +59,37 @@ func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcp
 		log.Printf("%v", err)
 		return
 	}
+	defer imageReader.Close()
 
-	imageBytes, err := io.ReadAll(imageReader)
-	if err != nil {
-		log.Printf("%v", err)
+	var imageBytes []byte
+
+	if imageHeight != "" {
+		imageHeightInt, err := strconv.Atoi(imageHeight)
+		if err != nil {
+			log.Printf("Could not convert image height to int: %v", err)
+		}
+
+		image, err := imaging.Decode(imageReader)
+		if err != nil {
+			log.Printf("Could not convert image to image package struct: %v", err)
+		}
+
+		resizedImage := imaging.Resize(image, 0, imageHeightInt, imaging.Lanczos)
+
+		var buf bytes.Buffer
+		err = imaging.Encode(&buf, resizedImage, imaging.JPEG)
+		if err != nil {
+			log.Printf("Could not encode resized image: %v", err)
+			http.Error(w, "Could not encode image", http.StatusInternalServerError)
+			return
+		}
+
+		imageBytes = buf.Bytes()
+	} else {
+		imageBytes, err = io.ReadAll(imageReader)
+		if err != nil {
+			log.Printf("%v", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
