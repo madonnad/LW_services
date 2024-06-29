@@ -75,6 +75,26 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	}
 
 	notification.ImageID = r.URL.Query().Get("image_id")
+	var image_owner string
+
+	imageOwnerQuery := `SELECT u.auth_zero_id, i.image_owner, a.album_id
+						FROM images i
+						JOIN users u
+						ON i.image_owner = u.user_id 
+						JOIN imagealbum ia
+						ON i.image_id = ia.image_id
+						JOIN albums a 
+						ON a.album_id = ia.album_id
+						WHERE i.image_id=$1`
+
+	err := connPool.Pool.QueryRow(ctx, imageOwnerQuery, notification.ImageID).Scan(&image_owner, &notification.ReceiverID, &notification.AlbumID)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get image_owner")
+		log.Printf("Could not get image_owner: %v", err)
+		return
+	}
+	// Setup the notification in the event that the image_owner is unliking their own image
+	notification.NotifierID = notification.ReceiverID
 
 	upvoteQuery := `DELETE FROM upvotes
 			  WHERE (image_id=$1
@@ -87,7 +107,9 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	batch := &pgx.Batch{}
 	batch.Queue(upvoteQuery, &notification.ImageID, uid)
-	batch.Queue(notificationQuery, &notification.ImageID, uid)
+	if image_owner != uid {
+		batch.Queue(notificationQuery, &notification.ImageID, uid)
+	}
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 	defer func() {
 		err := batchResults.Close()
@@ -109,11 +131,13 @@ func DELETEImageUpvote(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.ReceiverID, &notification.NotifierID)
-	if err != nil {
-		WriteErrorToWriter(w, "Error: Notification could not be deleted")
-		log.Printf("Notification could not be deleted: %v", err)
-		return
+	if image_owner != uid {
+		err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.ReceiverID, &notification.NotifierID)
+		if err != nil {
+			WriteErrorToWriter(w, "Error: Notification could not be deleted")
+			log.Printf("Notification could not be deleted: %v", err)
+			return
+		}
 	}
 
 	countQuery := `SELECT COUNT(*) FROM upvotes WHERE image_id=$1`
@@ -287,6 +311,26 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 	}
 
 	notification.ImageID = r.URL.Query().Get("image_id")
+	var image_owner string
+
+	imageOwnerQuery := `SELECT u.auth_zero_id, i.image_owner, a.album_id
+						FROM images i
+						JOIN users u
+						ON i.image_owner = u.user_id 
+						JOIN imagealbum ia
+						ON i.image_id = ia.image_id
+						JOIN albums a 
+						ON a.album_id = ia.album_id
+						WHERE i.image_id=$1`
+
+	err := connPool.Pool.QueryRow(ctx, imageOwnerQuery, notification.ImageID).Scan(&image_owner, &notification.ReceiverID, &notification.AlbumID)
+	if err != nil {
+		WriteErrorToWriter(w, "Error: Could not get image_owner")
+		log.Printf("Could not get image_owner: %v", err)
+		return
+	}
+	// Setup the notification in the event that the image_owner is unliking their own image
+	notification.NotifierID = notification.ReceiverID
 
 	upvoteQuery := `DELETE FROM likes
 			  WHERE (image_id=$1
@@ -299,7 +343,9 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	batch := &pgx.Batch{}
 	batch.Queue(upvoteQuery, &notification.ImageID, uid)
-	batch.Queue(notificationQuery, &notification.ImageID, uid)
+	if image_owner != uid {
+		batch.Queue(notificationQuery, &notification.ImageID, uid)
+	}
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 	defer func() {
 		err := batchResults.Close()
@@ -321,11 +367,13 @@ func DELETEImageLike(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.ReceiverID, &notification.NotifierID)
-	if err != nil {
-		WriteErrorToWriter(w, "Error: Notification could not be deleted")
-		log.Printf("Notification could not be deleted: %v", err)
-		return
+	if image_owner != uid {
+		err = batchResults.QueryRow().Scan(&notification.AlbumID, &notification.ReceiverID, &notification.NotifierID)
+		if err != nil {
+			WriteErrorToWriter(w, "Error: Notification could not be deleted")
+			log.Printf("Notification could not be deleted: %v", err)
+			return
+		}
 	}
 
 	countQuery := `SELECT COUNT(*) FROM likes WHERE image_id=$1`
