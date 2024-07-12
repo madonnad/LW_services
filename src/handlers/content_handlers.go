@@ -50,6 +50,7 @@ func GenerateAndSendSignedUrl(w http.ResponseWriter, r *http.Request, gcpStorage
 }
 
 func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcpStorage storage.Client, bucket string) {
+	start := time.Now()
 	imageId := r.URL.Query().Get("id")
 	imageHeight := r.URL.Query().Get("height")
 
@@ -94,4 +95,5 @@ func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcp
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(imageBytes)
+	log.Printf("height: %v duration: %v", imageHeight, time.Since(start))
 }
