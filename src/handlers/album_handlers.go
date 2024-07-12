@@ -334,12 +334,12 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	}
 
 	createAlbumQuery := `INSERT INTO albums
-						  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at)
-						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6) RETURNING album_id, created_at, album_owner`
+						  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at, visibility)
+						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6, $7) RETURNING album_id, created_at, album_owner`
 
 	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
 		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
-		album.UnlockedAt, album.RevealedAt).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
+		album.UnlockedAt, album.RevealedAt, album.Visibility).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
