@@ -24,7 +24,10 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context) http.HandlerFu
 
 		switch r.Method {
 		case http.MethodPost:
-			POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			switch r.URL.Path {
+			case "/user":
+				POSTNewAccount(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			}
 		case http.MethodGet:
 			switch r.URL.Path {
 			case "/user":
@@ -32,7 +35,13 @@ func UserEndpointHandler(connPool *m.PGPool, ctx context.Context) http.HandlerFu
 			case "/user/id":
 				GETUserByUID(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
+		case http.MethodPatch:
+			switch r.URL.Path {
+			case "/user":
+				PATCHAuthUserInfo(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
+			}
 		}
+
 	})
 }
 
@@ -76,6 +85,25 @@ func POSTNewAccount(ctx context.Context, w http.ResponseWriter, r *http.Request,
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBytes)
+}
+
+func PATCHAuthUserInfo(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authZeroId string) {
+	firstName := r.URL.Query().Get("first")
+	lastName := r.URL.Query().Get("last")
+
+	updateQuery := `UPDATE users 
+					SET first_name=$1, last_name=$2
+					WHERE auth_zero_id=$3`
+
+	tag, err := connPool.Pool.Exec(ctx, updateQuery, firstName, lastName, authZeroId)
+	if err != nil || tag.RowsAffected() == 0 {
+		log.Printf("Error updating auth user info: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Error updating auth user info"))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Auth user info updated"))
 }
 
 func GETAuthUserInformation(w http.ResponseWriter, connPool *m.PGPool, uid string) {
