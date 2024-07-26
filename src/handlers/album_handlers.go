@@ -45,7 +45,11 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			case "/album/guests":
 				InviteUserToAlbum(ctx, w, r, rdb, connPool, messagingClient)
 			}
-
+		case http.MethodPatch:
+			switch r.URL.Path {
+			case "/album/visibility":
+				PATCHAlbumVisibility(ctx, w, r, connPool)
+			}
 		}
 	})
 }
@@ -423,6 +427,34 @@ func GETAlbumGuests(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
 
+}
+
+func PATCHAlbumVisibility(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	visibility := r.URL.Query().Get("visibility")
+	albumID := r.URL.Query().Get("album_id")
+	w.Header().Set("Content-Type", "application/json")
+
+	updateQuery := `UPDATE albums
+					SET visibility = $1
+					WHERE album_id = $2`
+
+	rowsEdited, err := connPool.Pool.Exec(ctx, updateQuery, visibility, albumID)
+	if err != nil {
+		log.Print(err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	if rowsEdited.RowsAffected() == 0 {
+		response := "Album visibility not changed - no albums updated"
+		log.Print(response)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(response))
+		return
+	}
+
+	w.Write([]byte("Album visibility updated"))
 }
 
 func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
