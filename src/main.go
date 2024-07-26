@@ -105,17 +105,18 @@ func main() {
 	jwtMiddleware := middleware.EnsureValidToken(authDomain, authAudience)
 
 	//Route Register
-	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                       // Unprotected
-	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                   // Protected
-	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                             // Protected
-	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool))).Methods("GET")                                        // Protected
-	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
-	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                      // Protected
-	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE")  // Protected
-	r.Handle("/image/comment/seen", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("PATCH")                      // Protected
-	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                     // Protected
-	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                   // Protected
-	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")                    // Protected
+	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                      // Unprotected
+	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                  // Protected
+	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                            // Protected
+	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool))).Methods("GET")                                       // Protected
+	r.Handle("/feed", jwtMiddleware(h.FeedEndpointHandler(ctx, connPool))).Methods("GET")                                           // Protected
+	r.Handle("/image", jwtMiddleware(h.ContentEndpointHandler(ctx, *gcpStorage, storageBucket))).Methods("GET")                     // Protected
+	r.Handle("/image/comment", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("GET", "POST", "PATCH", "DELETE") // Protected
+	r.Handle("/image/comment/seen", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("PATCH")                     // Protected
+	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                    // Protected
+	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                  // Protected
+	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")
+	r.Handle("/album/visibility", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("PATCH")       // Protected
 	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")             // Protected
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET")           // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient))).Methods("GET", "POST")     // Protected
