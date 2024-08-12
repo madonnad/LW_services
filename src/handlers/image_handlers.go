@@ -902,19 +902,19 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 			if caption, ok := value.(string); ok {
 				image.Caption = caption
 			} else {
-				fmt.Println("Value is not a string")
+				fmt.Println("caption is not defined")
 			}
 		case "album_id":
 			if id, ok := value.(string); ok {
 				album_id = id
 			} else {
-				fmt.Println("Value is not a string")
+				fmt.Println("album id is not defined")
 			}
 		case "upload_type":
 			if uploadType, ok := value.(string); ok {
 				image.UploadType = uploadType
 			} else {
-				fmt.Println("Value is not a string")
+				fmt.Println("upload type not defined")
 			}
 		}
 	}
