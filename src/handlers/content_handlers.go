@@ -32,7 +32,7 @@ func GenerateAndSendSignedUrl(w http.ResponseWriter, r *http.Request, gcpStorage
 
 	opts := &storage.SignedURLOptions{
 		Scheme: storage.SigningSchemeV4,
-		Method: "PUT",
+		Method: http.MethodPut,
 		Headers: []string{
 			"Content-Type:application/octet-stream",
 		},
