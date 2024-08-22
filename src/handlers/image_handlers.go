@@ -898,6 +898,14 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	for key, value := range result {
 		switch key {
+		case "uuid":
+			if imageID, ok := value.(string); ok {
+				image.ID = imageID
+			} else {
+				log.Println("Error: Image UUID not provided")
+				WriteErrorToWriter(w, "Error: Image UUID not provided")
+				return
+			}
 		case "caption":
 			if caption, ok := value.(string); ok {
 				image.Caption = caption
@@ -920,9 +928,9 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	}
 
 	imageCreationQuery := `INSERT INTO images
-			  (image_owner, caption, upload_type) VALUES ((SELECT user_id FROM users WHERE auth_zero_id=$1), $2, $3)
+			  (image_id, image_owner, caption, upload_type) VALUES ($1,(SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4)
 			  RETURNING image_id, created_at`
-	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ImageOwner, image.Caption,
+	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ID, image.ImageOwner, image.Caption,
 		image.UploadType).Scan(&image.ID, &image.CreatedAt)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create image in database")
