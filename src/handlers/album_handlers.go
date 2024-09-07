@@ -520,6 +520,7 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		}
 
 		fcmNotification.RecipientID = user.ID
+		//fcmNotification.Payload = albumRequest
 
 		err = SendFirebaseMessageToUID(ctx, connPool, messagingClient, fcmNotification)
 		if err != nil {
