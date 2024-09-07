@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"firebase.google.com/go/v4/messaging"
 	"fmt"
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
@@ -13,7 +14,7 @@ import (
 	"net/http"
 )
 
-func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Client) http.Handler {
+func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Client, messagingClient *messaging.Client) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -23,9 +24,9 @@ func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cl
 
 		switch r.Method {
 		case http.MethodPost:
-			POSTFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+			POSTFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
 		case http.MethodPut:
-			PUTAcceptFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject)
+			PUTAcceptFriendRequest(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
 		case http.MethodDelete:
 			DELETEDenyFriendRequest(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 		case http.MethodPatch:
@@ -34,15 +35,15 @@ func FriendRequestHandler(ctx context.Context, connPool *m.PGPool, rdb *redis.Cl
 	})
 }
 
-func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, senderID string) {
+func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, senderID string, messagingClient *messaging.Client) {
 	var friendRequest m.FriendRequestNotification
 	friendRequest.ReceiverID = r.URL.Query().Get("id")
+
 	wsPayload := WebSocketPayload{
 		Operation: "REQUEST",
 		Type:      "friend-request",
 		UserID:    friendRequest.ReceiverID,
 	}
-	log.Print("Friend Request Start")
 
 	// Create SQL entry to add request to friend request table
 	requestQuery := `INSERT INTO friend_requests (sender_id, receiver_id) 
@@ -61,7 +62,6 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}()
-	log.Print("Friend Request - Queries Made")
 
 	err := batchResults.QueryRow().Scan(&friendRequest.RequestID, &friendRequest.ReceivedAt)
 	if err != nil {
@@ -70,8 +70,6 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	log.Print("Friend Request - First Batch")
-
 	err = batchResults.QueryRow().Scan(&friendRequest.SenderID, &friendRequest.FirstName, &friendRequest.LastName)
 	if err != nil {
 		WriteErrorToWriter(w, "Error: Unable to lookup requesting user")
@@ -79,7 +77,14 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	log.Print("Friend Request - Second Batch")
+	var fcmNotification = m.FirebaseNotification{
+		RecipientID:    friendRequest.ReceiverID,
+		NotificationID: friendRequest.RequestID,
+		ContentName:    friendRequest.FirstName,
+		RequesterID:    friendRequest.SenderID,
+		RequesterName:  friendRequest.FirstName,
+		Type:           "friend-request",
+	}
 
 	wsPayload.Payload = friendRequest
 
@@ -94,7 +99,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		log.Print(err)
 	}
 
-	log.Print("Friend Request - Published")
+	err = SendFirebaseMessageToUID(ctx, connPool, messagingClient, fcmNotification)
 
 	//Respond to the calling user that the action was successful
 	responseBytes, err := json.MarshalIndent("friend request sent - success", "", "\t")
@@ -107,7 +112,7 @@ func POSTFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	w.Write(responseBytes)
 }
 
-func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string) {
+func PUTAcceptFriendRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, rdb *redis.Client, usersID string, messagingClient *messaging.Client) {
 	var friendRequest m.FriendRequestNotification
 	friendRequest.SenderID = r.URL.Query().Get("id")
 	friendRequest.RequestID = r.URL.Query().Get("request_id")
