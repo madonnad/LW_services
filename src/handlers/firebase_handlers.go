@@ -55,7 +55,7 @@ func SendFirebaseMessageToUID(context context.Context, connPool *m.PGPool, messa
 	var title string
 	var body string
 	var tokens []string
-	//var dataPayload map[string]string
+	var dataPayload map[string]string
 
 	tokenQuery := `SELECT token FROM firebase_tokens WHERE user_id = $1`
 
@@ -77,11 +77,15 @@ func SendFirebaseMessageToUID(context context.Context, connPool *m.PGPool, messa
 
 	switch notification.Type {
 	case "album-invite":
-		//dataPayload = v.FirebaseToMap()
+		dataPayload = map[string]string{
+			"type": "album-invite",
+		}
 		title = fmt.Sprintf("Accept invite to %v", notification.ContentName)
 		body = fmt.Sprintf("%v sent you an album invite.", notification.RequesterName)
 	case "friend-request":
-		//dataPayload = v.FirebaseToMap()
+		dataPayload = map[string]string{
+			"type": "friend-request",
+		}
 		title = fmt.Sprintf("New Friend Request!")
 		body = fmt.Sprintf("%v sent you a friend request.", notification.RequesterName)
 		log.Print("Inside friend request")
@@ -93,7 +97,7 @@ func SendFirebaseMessageToUID(context context.Context, connPool *m.PGPool, messa
 	}
 
 	message := messaging.MulticastMessage{
-		//Data:         dataPayload,
+		Data:         dataPayload,
 		Tokens:       tokens,
 		Notification: &fcmNotification,
 	}
