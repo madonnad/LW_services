@@ -26,15 +26,15 @@ func (album *Album) PhaseCalculation() error {
 	currentUtcTime := time.Now().UTC()
 
 	switch {
-	case currentUtcTime.Before(album.UnlockedAt):
-		album.Phase = "invite"
-		return nil
-	case currentUtcTime.Before(album.LockedAt):
+	//case currentUtcTime.Before(album.UnlockedAt):
+	//	album.Phase = "invite"
+	//	return nil
+	case currentUtcTime.Before(album.RevealedAt):
 		album.Phase = "unlock"
 		return nil
-	case currentUtcTime.Before(album.RevealedAt):
-		album.Phase = "lock"
-		return nil
+	//case currentUtcTime.Before(album.RevealedAt):
+	//	album.Phase = "lock"
+	//	return nil
 	case currentUtcTime.After(album.RevealedAt):
 		album.Phase = "reveal"
 		return nil
