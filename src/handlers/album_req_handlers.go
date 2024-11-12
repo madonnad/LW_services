@@ -55,7 +55,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2))`
 
 	acceptsInfoQuery := `SELECT user_id, first_name, last_name from users WHERE auth_zero_id = $1`
-	albumInfoQuery := `SELECT a.album_name, a.album_cover_id, a.unlocked_at ,a.album_owner, u.first_name, u.last_name
+	albumInfoQuery := `SELECT a.album_name, a.album_cover_id, a.revealed_at ,a.album_owner, u.first_name, u.last_name
 						FROM albums a
 						JOIN users u
 						ON u.user_id = a.album_owner
@@ -95,7 +95,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	if err != nil {
 		log.Print(err)
 	}
-	err = batchResults.QueryRow().Scan(&notification.AlbumName, &notification.AlbumCoverID, &notification.UnlockedAt,
+	err = batchResults.QueryRow().Scan(&notification.AlbumName, &notification.AlbumCoverID, &notification.RevealedAt,
 		&notification.AlbumOwner, &notification.OwnerFirst, &notification.OwnerLast)
 	if err != nil {
 		log.Print(err)
