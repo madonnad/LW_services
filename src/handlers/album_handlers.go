@@ -486,7 +486,7 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		AlbumOwner:   album.AlbumOwner,
 		OwnerFirst:   album.OwnerFirst,
 		OwnerLast:    album.OwnerLast,
-		UnlockedAt:   album.UnlockedAt,
+		RevealedAt:   album.RevealedAt,
 	}
 
 	var fcmNotification = m.FirebaseNotification{
@@ -545,7 +545,7 @@ func InviteUserToAlbum(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	albumRequest.AlbumID = r.URL.Query().Get("album_id")
 
 	// Batch Request Query for Stored Information
-	albumInfoRequestQuery := `SELECT album_name, album_cover_id, unlocked_at FROM albums WHERE album_id = $1`
+	albumInfoRequestQuery := `SELECT album_name, album_cover_id, revealed_at FROM albums WHERE album_id = $1`
 	getGuestInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
 	getRequesterInfoQuery := `SELECT first_name, last_name FROM users WHERE user_id = $1`
 
@@ -561,7 +561,7 @@ func InviteUserToAlbum(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
 	// Scan Batch Results
-	err := batchResults.QueryRow().Scan(&albumRequest.AlbumName, &albumRequest.AlbumCoverID, &albumRequest.UnlockedAt)
+	err := batchResults.QueryRow().Scan(&albumRequest.AlbumName, &albumRequest.AlbumCoverID, &albumRequest.RevealedAt)
 	err = batchResults.QueryRow().Scan(&albumRequest.GuestID, &albumRequest.GuestFirst, &albumRequest.GuestLast)
 	err = batchResults.QueryRow().Scan(&albumRequest.OwnerFirst, &albumRequest.OwnerFirst)
 	if err != nil {
