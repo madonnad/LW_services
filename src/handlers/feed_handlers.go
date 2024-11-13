@@ -35,7 +35,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 	albums := []m.Album{}
 
 	query :=
-		`SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
+		`SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.revealed_at, a.album_cover_id, a.visibility
 			FROM albums a
 			JOIN albumuser au
 			ON a.album_id = au.album_id
@@ -51,7 +51,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 			ON au.user_id = fl.friend_id
 			WHERE a.visibility = 'public' OR a.visibility = 'friends'
 			UNION DISTINCT
-			SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.locked_at, a.unlocked_at, a.revealed_at, a.album_cover_id, a.visibility
+			SELECT a.album_id, a.album_name, a.album_owner, u.first_name, u.last_name, a.created_at, a.revealed_at, a.album_cover_id, a.visibility
 			FROM albums a
 			JOIN albumuser au
 			ON a.album_id = au.album_id
@@ -69,7 +69,7 @@ func GETAppFeed(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, 
 		var album m.Album
 
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
-			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
+			&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			WriteErrorToWriter(w, "Scanning SQL response failed")
 			log.Printf("Scanning the response failed with: %v", err)
