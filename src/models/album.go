@@ -13,8 +13,6 @@ type Album struct {
 	OwnerLast    string    `json:"owner_last"`
 	AlbumCoverID string    `json:"album_cover_id"`
 	CreatedAt    time.Time `json:"created_at"`
-	LockedAt     time.Time `json:"locked_at"`
-	UnlockedAt   time.Time `json:"unlocked_at"`
 	RevealedAt   time.Time `json:"revealed_at"`
 	Visibility   string    `json:"visibility"`
 	InviteList   []Guest   `json:"invite_list"`
