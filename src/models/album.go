@@ -13,8 +13,6 @@ type Album struct {
 	OwnerLast    string    `json:"owner_last"`
 	AlbumCoverID string    `json:"album_cover_id"`
 	CreatedAt    time.Time `json:"created_at"`
-	LockedAt     time.Time `json:"locked_at"`
-	UnlockedAt   time.Time `json:"unlocked_at"`
 	RevealedAt   time.Time `json:"revealed_at"`
 	Visibility   string    `json:"visibility"`
 	InviteList   []Guest   `json:"invite_list"`
@@ -26,15 +24,15 @@ func (album *Album) PhaseCalculation() error {
 	currentUtcTime := time.Now().UTC()
 
 	switch {
-	case currentUtcTime.Before(album.UnlockedAt):
-		album.Phase = "invite"
-		return nil
-	case currentUtcTime.Before(album.LockedAt):
+	//case currentUtcTime.Before(album.UnlockedAt):
+	//	album.Phase = "invite"
+	//	return nil
+	case currentUtcTime.Before(album.RevealedAt):
 		album.Phase = "unlock"
 		return nil
-	case currentUtcTime.Before(album.RevealedAt):
-		album.Phase = "lock"
-		return nil
+	//case currentUtcTime.Before(album.RevealedAt):
+	//	album.Phase = "lock"
+	//	return nil
 	case currentUtcTime.After(album.RevealedAt):
 		album.Phase = "reveal"
 		return nil

@@ -65,14 +65,14 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 	// Looks up any accepted or pending requests from logged in user
 	queryAlbumInvites := `
 						SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name,
-						       		u.last_name, u2.user_id, u2.first_name, u2.last_name ,ar.updated_at, a.unlocked_at,
+						       		u.last_name, u2.user_id, u2.first_name, u2.last_name ,ar.updated_at, a.revealed_at,
 						       		ar.invite_seen, ar.response_seen, ar.status
 						FROM album_requests ar
 						JOIN albums a ON a.album_id = ar.album_id
 						JOIN users u ON u.user_id = a.album_owner
 						JOIN users u2 ON ar.invited_id = u2.user_id
 						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-						AND (ar.status = 'pending' OR (ar.status ='accepted') AND a.unlocked_at > now() AT TIME ZONE 'utc')`
+						AND (ar.status = 'pending' OR (ar.status ='accepted') AND a.revealed_at > now() AT TIME ZONE 'utc')`
 
 	rows, err := connPool.Pool.Query(ctx, queryAlbumInvites, uid)
 	if err != nil {
@@ -85,7 +85,7 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
 			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.GuestID, &request.GuestFirst,
-			&request.GuestLast, &request.ReceivedAt, &request.UnlockedAt,
+			&request.GuestLast, &request.ReceivedAt, &request.RevealedAt,
 			&request.InviteSeen, &request.ResponseSeen, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object AlbumInvites: %v", err)
@@ -101,7 +101,7 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
 	var albumRequestResponses []m.AlbumRequestNotification
 	querySentAlbumInviteResponses := `SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, 
        									u2.first_name, u2.last_name, ar.invited_id, u.first_name, u.last_name, 
-       									ar.updated_at, a.unlocked_at, ar.invite_seen, ar.response_seen, ar.status
+       									ar.updated_at, a.revealed_at, ar.invite_seen, ar.response_seen, ar.status
 									FROM album_requests ar
 									JOIN albums a ON a.album_id = ar.album_id
 									JOIN users u ON ar.invited_id = u.user_id
@@ -120,7 +120,7 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
 
 		err := rows.Scan(&request.RequestID, &request.AlbumID, &request.AlbumName, &request.AlbumCoverID,
 			&request.AlbumOwner, &request.OwnerFirst, &request.OwnerLast, &request.GuestID, &request.GuestFirst,
-			&request.GuestLast, &request.ReceivedAt, &request.UnlockedAt, &request.InviteSeen, &request.ResponseSeen, &request.Status)
+			&request.GuestLast, &request.ReceivedAt, &request.RevealedAt, &request.InviteSeen, &request.ResponseSeen, &request.Status)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to insert data to object: %v", err)
 			return nil, err

@@ -43,7 +43,7 @@ type AlbumRequestNotification struct {
 	InviteSeen   bool      `json:"invite_seen"`
 	ResponseSeen bool      `json:"response_seen"`
 	ReceivedAt   time.Time `json:"received_at"`
-	UnlockedAt   time.Time `json:"unlocked_at"`
+	RevealedAt   time.Time `json:"revealed_at"`
 }
 
 func (notification AlbumRequestNotification) FirebaseToMap() map[string]string {
@@ -63,7 +63,7 @@ func (notification AlbumRequestNotification) FirebaseToMap() map[string]string {
 		"invite_seen":    strconv.FormatBool(notification.InviteSeen),
 		"response_seen":  strconv.FormatBool(notification.ResponseSeen),
 		"received_at":    notification.ReceivedAt.Format(time.RFC3339), // converting time.Time to string
-		"unlocked_at":    notification.UnlockedAt.Format(time.RFC3339), // converting time.Time to string
+		"revealed_at":    notification.RevealedAt.Format(time.RFC3339), // converting time.Time to string
 	}
 }
 

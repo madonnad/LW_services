@@ -60,7 +60,7 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	batch := &pgx.Batch{}
 	albumID := r.URL.Query().Get("album_id")
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 					  FROM albums a
 					  JOIN albumuser au
 					  ON au.album_id=a.album_id
@@ -86,7 +86,7 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	}()
 
 	err := batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
-		&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
+		&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 	if err != nil {
 		log.Print(err)
 		return
@@ -160,7 +160,7 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 		return
 	}
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 					  FROM albums a
 					  JOIN albumuser au
 					  ON au.album_id=a.album_id
@@ -179,7 +179,7 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 		var guests []m.Guest
 
 		err = connPool.Pool.QueryRow(ctx, albumQuery, id).Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
-			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
+			&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			log.Print(err)
 		}
@@ -230,7 +230,7 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, ctx context.Context) {
 	var albums []m.Album
 
-	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, locked_at, unlocked_at, revealed_at, album_cover_id, visibility
+	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 				   FROM albums a
 				   JOIN albumuser au
 				   ON au.album_id=a.album_id
@@ -259,7 +259,7 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 
 		// Create Album Object
 		err := response.Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
-			&album.CreatedAt, &album.LockedAt, &album.UnlockedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
+			&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 		if err != nil {
 			log.Print(err)
 		}
@@ -338,12 +338,11 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	}
 
 	createAlbumQuery := `INSERT INTO albums
-						  (album_name, album_owner, album_cover_id, locked_at, unlocked_at, revealed_at, visibility)
-						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5, $6, $7) RETURNING album_id, created_at, album_owner`
+						  (album_name, album_owner, album_cover_id, revealed_at, visibility)
+						  VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5) RETURNING album_id, created_at, album_owner`
 
 	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
-		album.AlbumName, uid, album.AlbumCoverID, album.LockedAt,
-		album.UnlockedAt, album.RevealedAt, album.Visibility).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
+		album.AlbumName, uid, album.AlbumCoverID, album.RevealedAt, album.Visibility).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
@@ -366,6 +365,13 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
+		return
+	}
+
+	err = album.PhaseCalculation()
+	if err != nil {
+		WriteErrorToWriter(w, "Unable to calculate phase")
+		log.Printf("Unable to calculate phase %v", err)
 		return
 	}
 
@@ -480,7 +486,7 @@ func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, r
 		AlbumOwner:   album.AlbumOwner,
 		OwnerFirst:   album.OwnerFirst,
 		OwnerLast:    album.OwnerLast,
-		UnlockedAt:   album.UnlockedAt,
+		RevealedAt:   album.RevealedAt,
 	}
 
 	var fcmNotification = m.FirebaseNotification{
@@ -539,7 +545,7 @@ func InviteUserToAlbum(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	albumRequest.AlbumID = r.URL.Query().Get("album_id")
 
 	// Batch Request Query for Stored Information
-	albumInfoRequestQuery := `SELECT album_name, album_cover_id, unlocked_at FROM albums WHERE album_id = $1`
+	albumInfoRequestQuery := `SELECT album_name, album_cover_id, revealed_at FROM albums WHERE album_id = $1`
 	getGuestInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
 	getRequesterInfoQuery := `SELECT first_name, last_name FROM users WHERE user_id = $1`
 
@@ -555,7 +561,7 @@ func InviteUserToAlbum(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 
 	// Scan Batch Results
-	err := batchResults.QueryRow().Scan(&albumRequest.AlbumName, &albumRequest.AlbumCoverID, &albumRequest.UnlockedAt)
+	err := batchResults.QueryRow().Scan(&albumRequest.AlbumName, &albumRequest.AlbumCoverID, &albumRequest.RevealedAt)
 	err = batchResults.QueryRow().Scan(&albumRequest.GuestID, &albumRequest.GuestFirst, &albumRequest.GuestLast)
 	err = batchResults.QueryRow().Scan(&albumRequest.OwnerFirst, &albumRequest.OwnerFirst)
 	if err != nil {
