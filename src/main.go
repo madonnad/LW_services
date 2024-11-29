@@ -38,6 +38,7 @@ func main() {
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_NAME")
+	//dbString := os.Getenv("DB_STRING")
 
 	// Redis Config Vals
 	rdbAddr := os.Getenv("RDB_ADDR")
@@ -60,6 +61,7 @@ func main() {
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v dbname=%v",
 		dbUser, dbPassword, unixSocketPath, dbName)
+
 	connPool, err := i.CreatePostgresPool(connString, ctx)
 	if err != nil {
 		fmt.Println("cannot get postgres instance:", err)
@@ -132,7 +134,7 @@ func main() {
 	r.Handle("/album-invite", jwtMiddleware(h.AlbumRequestHandler(ctx, connPool, rdb))).Methods("PUT", "DELETE", "PATCH")                             // Protected
 	r.Handle("/notifications", jwtMiddleware(h.NotificationsEndpointHandler(ctx, connPool, rdb))).Methods("GET", "PATCH")                             // Protected
 	r.Handle("/fcm", jwtMiddleware(h.FirebaseHandlers(connPool, ctx))).Methods("PUT")
-	r.Handle("/resize", jwtMiddleware(h.ContentEndpointHandler(ctx, connPool, *gcpStorage, storageBucket, stagingBucket))).Methods("POST")
+	//r.Handle("/resize", jwtMiddleware(h.ContentEndpointHandler(ctx, connPool, *gcpStorage, storageBucket, stagingBucket))).Methods("POST")
 
 	//Start Server
 	fmt.Printf("Server is starting on %v...\n", serverString)

@@ -65,6 +65,7 @@ func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcp
 	liveReader, err := obj.NewReader(ctx)
 	if err != nil {
 
+		// Check if the error was that the object does not exist
 		if strings.Contains(err.Error(), "object doesn't exist") {
 			//Strip out the resolution portion of the ID if it exists
 			parts := strings.Split(imageId, "_")
@@ -73,6 +74,36 @@ func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcp
 			intObj := gcpStorage.Bucket(stagingBucket).Object(cleanUUID)
 			stagingReader, internalErr := intObj.NewReader(ctx)
 			if internalErr != nil {
+
+				// Check if the error was that the object does not exist
+				if strings.Contains(internalErr.Error(), "object doesn't exist") {
+					var phString string
+					var phObj *storage.ObjectHandle
+					var phReader *storage.Reader
+					var phErr error
+
+					if len(parts) > 1 {
+						resolution := parts[1]
+						phString = fmt.Sprintf("LW_placeholder_%v", resolution)
+					} else {
+						phString = "LW_placeholder"
+					}
+
+					phObj = gcpStorage.Bucket(liveBucket).Object(phString)
+					phReader, phErr = phObj.NewReader(ctx)
+					if phErr != nil {
+						log.Printf("No placeholder image: %v", err)
+						return
+					}
+
+					phErr = SendImage(w, *phReader)
+					if phErr != nil {
+						log.Printf("Could not send placeholder image data %v", err)
+						return
+					}
+					return
+				}
+
 				log.Printf("Staging Bucket Check: %v", err)
 				return
 			}
@@ -129,8 +160,8 @@ func ResizeAllImages(ctx context.Context, w http.ResponseWriter, connPool *m.PGP
 
 	var countCompleted int
 
-	query := `SELECT image_id FROM images`
-	queryCount := `SELECT COUNT(*) FROM images`
+	query := `SELECT user_id FROM users`
+	queryCount := `SELECT COUNT(user_id) FROM users`
 
 	var rowCount int
 	err := connPool.Pool.QueryRow(ctx, queryCount).Scan(&rowCount)
@@ -172,12 +203,14 @@ func ResizeAllImages(ctx context.Context, w http.ResponseWriter, connPool *m.PGP
 		obj := gcpStorage.Bucket(bucket).Object(uuid)
 		reader, err := obj.NewReader(ctx)
 		if err != nil {
+			countCompleted++
 			continue
 		}
 
 		image, err := imaging.Decode(reader, imaging.AutoOrientation(true))
 		if err != nil {
 			log.Printf("failed to open image: %v", err)
+			countCompleted++
 			continue
 		}
 
@@ -196,6 +229,7 @@ func ResizeAllImages(ctx context.Context, w http.ResponseWriter, connPool *m.PGP
 		err = reader.Close()
 		if err != nil {
 			log.Printf("Error closing reader for object %s: %v", uuid, err)
+			countCompleted++
 			continue
 		}
 
