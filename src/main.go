@@ -107,7 +107,8 @@ func main() {
 	jwtMiddleware := middleware.EnsureValidToken(authDomain, authAudience)
 
 	//Route Register
-	r.HandleFunc("/", connPool.GETHandlerRoot)                                                                                           // Unprotected
+	r.HandleFunc("/", connPool.GETHandlerRoot)
+	r.HandleFunc("/.well-known/apple-app-site-association", h.AssociatedDomains)                                                         // Unprotected
 	r.Handle("/ws", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                       // Protected
 	r.Handle("/ws/album", jwtMiddleware(h.WebSocketEndpointHandler(connPool, rdb, ctx)))                                                 // Protected
 	r.Handle("/search", jwtMiddleware(h.SearchEndpointHandler(ctx, connPool))).Methods("GET")                                            // Protected
