@@ -476,6 +476,20 @@ func WriteErrorToWriter(w http.ResponseWriter, errorString string) {
 	w.Write(responseBytes)
 }
 
+func WriteResponseWithCode(w http.ResponseWriter, code int, message string) {
+	jsonString, err := json.MarshalIndent(message, "", "\t")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	responseBytes := []byte(jsonString)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(responseBytes)
+}
+
 func SendAlbumRequests(ctx context.Context, album *m.Album, invited []m.Guest, rdb *redis.Client, connPool *m.PGPool, messagingClient *messaging.Client) error {
 	query := `INSERT INTO album_requests (album_id, invited_id) 
 										VALUES ($1, $2) RETURNING request_id, updated_at, invite_seen, response_seen, status`
