@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	m "last_weekend_services/src/models"
@@ -67,6 +68,7 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			case "/user/recap":
 				POSTImageToRecap(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
+
 		}
 	})
 }
@@ -977,6 +979,23 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func DELETEImageData(ctx context.Context, connPool *m.PGPool, imageID string, uid string) error {
+	query := `DELETE FROM images WHERE image_id = $1 AND image_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
+
+	result, err := connPool.Pool.Exec(ctx, query, imageID, uid)
+	if err != nil {
+		return err
+		//return errors.New("error deleting image details")
+	}
+
+	if result.RowsAffected() < 1 {
+		return errors.New("no content found for lookup")
+	}
+
+	return nil
+
 }
 
 func PATCHUpdateImageAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {

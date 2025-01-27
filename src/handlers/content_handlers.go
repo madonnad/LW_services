@@ -5,6 +5,8 @@ import (
 	"cloud.google.com/go/storage"
 	"context"
 	"fmt"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 	"github.com/disintegration/imaging"
 	image2 "image"
 	"io"
@@ -17,7 +19,12 @@ import (
 
 func ContentEndpointHandler(ctx context.Context, connPool *m.PGPool, gcpStorage storage.Client, liveBucket string, stagingBucket string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		///log.Print(r.URL.Path)
+		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		if !ok {
+			fmt.Fprintf(w, "Failed to get validated claims")
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			switch r.URL.Path {
@@ -32,6 +39,8 @@ func ContentEndpointHandler(ctx context.Context, connPool *m.PGPool, gcpStorage 
 				ResizeAllImages(ctx, w, connPool, gcpStorage, liveBucket)
 
 			}
+		case http.MethodDelete:
+			DeleteMediaFromID(ctx, w, r, connPool, gcpStorage, claims.RegisteredClaims.Subject, liveBucket)
 		}
 	})
 }
@@ -287,4 +296,31 @@ func encodeAndWriteToBucket(ctx context.Context, bucket *storage.BucketHandle, i
 	}
 
 	return nil
+}
+
+func DeleteMediaFromID(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, gcpStorage storage.Client, id string, bucket string) {
+	imageID := r.URL.Query().Get("image_id")
+	smallImageID := fmt.Sprintf("%s_%d", imageID, 540)
+	largeImageID := fmt.Sprintf("%s_%d", imageID, 1080)
+
+	err := DELETEImageData(ctx, connPool, imageID, id)
+	if err != nil {
+		log.Printf("Could not find")
+		WriteResponseWithCode(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	err = gcpStorage.Bucket(bucket).Object(imageID).Delete(ctx)
+	if err != nil {
+		log.Println(err)
+	}
+	err = gcpStorage.Bucket(bucket).Object(smallImageID).Delete(ctx)
+	if err != nil {
+		log.Println(err)
+	}
+	err = gcpStorage.Bucket(bucket).Object(largeImageID).Delete(ctx)
+	if err != nil {
+		log.Println(err)
+	}
+	WriteResponseWithCode(w, http.StatusOK, "Success")
 }
