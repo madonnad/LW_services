@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	m "last_weekend_services/src/models"
 	"log"
 	"net/http"
 	"sort"
+	"time"
 
 	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
 	"github.com/auth0/go-jwt-middleware/v2/validator"
@@ -66,6 +68,7 @@ func ImageEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			case "/user/recap":
 				POSTImageToRecap(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
+
 		}
 	})
 }
@@ -797,7 +800,7 @@ func GETImagesFromUserID(ctx context.Context, w http.ResponseWriter, r *http.Req
 
 	for result.Next() {
 		var image m.Image
-		err := result.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.UploadType, &image.CreatedAt)
+		err := result.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.UploadType, &image.CapturedAt)
 		if err != nil {
 			log.Print(err)
 		}
@@ -831,7 +834,7 @@ func GETImageFromID(ctx context.Context, w http.ResponseWriter, r *http.Request,
 			  FROM images WHERE image_id = $1`
 
 	results := connPool.Pool.QueryRow(ctx, query, uid)
-	err = results.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CreatedAt)
+	err = results.Scan(&image.ID, &image.ImageOwner, &image.Caption, &image.Upvotes, &image.CapturedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			WriteErrorToWriter(w, "Error: Image does not exist")
@@ -924,14 +927,26 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 			} else {
 				fmt.Println("upload type not defined")
 			}
+		case "captured_at":
+			if capturedAt, ok := value.(string); ok {
+				layout := time.RFC3339 // For ISO8601 format
+				parsedTime, err := time.Parse(layout, capturedAt)
+				if err != nil {
+					fmt.Println("Error parsing datetime:", err)
+				} else {
+					image.CapturedAt = parsedTime
+				}
+			} else {
+				fmt.Println("upload type not defined")
+			}
 		}
 	}
 
 	imageCreationQuery := `INSERT INTO images
-			  (image_id, image_owner, caption, upload_type) VALUES ($1,(SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4)
+			  (image_id, image_owner, caption, upload_type, captured_at) VALUES ($1,(SELECT user_id FROM users WHERE auth_zero_id=$2), $3, $4, $5)
 			  RETURNING image_id, created_at`
 	err = connPool.Pool.QueryRow(ctx, imageCreationQuery, image.ID, image.ImageOwner, image.Caption,
-		image.UploadType).Scan(&image.ID, &image.CreatedAt)
+		image.UploadType, image.CapturedAt).Scan(&image.ID, &image.CapturedAt)
 	if err != nil {
 		WriteErrorToWriter(w, "Unable to create image in database")
 		log.Printf("Unable to create image in database: %v", err)
@@ -964,6 +979,23 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
 	w.Write(responseBytes)
+}
+
+func DELETEImageData(ctx context.Context, connPool *m.PGPool, imageID string, uid string) error {
+	query := `DELETE FROM images WHERE image_id = $1 AND image_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
+
+	result, err := connPool.Pool.Exec(ctx, query, imageID, uid)
+	if err != nil {
+		return err
+		//return errors.New("error deleting image details")
+	}
+
+	if result.RowsAffected() < 1 {
+		return errors.New("no content found for lookup")
+	}
+
+	return nil
+
 }
 
 func PATCHUpdateImageAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
@@ -1035,7 +1067,7 @@ func QueryImagesData(ctx context.Context, connPool *m.PGPool, album *m.Album, ui
 		var image m.Image
 
 		err = imageResponse.Scan(&image.ID, &image.ImageOwner, &image.FirstName, &image.LastName, &image.Caption,
-			&image.UploadType, &image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CreatedAt)
+			&image.UploadType, &image.Likes, &image.Upvotes, &image.UserLiked, &image.UserUpvoted, &image.CapturedAt)
 		if err != nil {
 			log.Print(err)
 		}

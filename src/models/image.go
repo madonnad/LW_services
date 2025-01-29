@@ -16,4 +16,5 @@ type Image struct {
 	UserUpvoted bool      `json:"user_upvoted"`
 	UserLiked   bool      `json:"user_liked"`
 	CreatedAt   time.Time `json:"created_at"`
+	CapturedAt  time.Time `json:"captured_at"`
 }
