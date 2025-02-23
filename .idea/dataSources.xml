@@ -22,5 +22,12 @@
       <jdbc-url>jdbc:postgresql://localhost:5432/lw_db</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
+    <data-source source="LOCAL" name="lw_db@fedora" uuid="a162507b-a329-4c3d-ab74-95df2fcf3a7f">
+      <driver-ref>postgresql</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.postgresql.Driver</jdbc-driver>
+      <jdbc-url>jdbc:postgresql://fedora:5432/lw_db</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
   </component>
 </project>
