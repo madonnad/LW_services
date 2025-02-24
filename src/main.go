@@ -57,8 +57,6 @@ func main() {
 	// GCP Storage Config Vals
 	storageBucket := os.Getenv("STORAGE_BUCKET")
 	stagingBucket := os.Getenv("STAGING_BUCKET")
-	print(storageBucket)
-	print(stagingBucket)
 
 	// Postgres Initialization
 	connString := fmt.Sprintf("user=%v password=%v host=%v dbname=%v",
