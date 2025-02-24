@@ -65,7 +65,11 @@ func GenerateAndSendSignedUrl(w http.ResponseWriter, r *http.Request, gcpStorage
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(url))
+	_, err = w.Write([]byte(url))
+	if err != nil {
+		log.Printf("Error writing signed url bytes to http writer %v", err)
+		return
+	}
 }
 
 func ServeImage(ctx context.Context, w http.ResponseWriter, r *http.Request, gcpStorage storage.Client, liveBucket string, stagingBucket string) {
