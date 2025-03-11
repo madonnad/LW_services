@@ -62,7 +62,7 @@ func GETExistingNotifications(ctx context.Context, w http.ResponseWriter, r *htt
 func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequests []m.AlbumRequestNotification
 
-	// Looks up any accepted or pending requests from logged in user
+	// Looks up any accepted or pending requests for logged-in user
 	queryAlbumInvites := `
 						SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, u.first_name,
 						       		u.last_name, u2.user_id, u2.first_name, u2.last_name ,ar.updated_at, a.revealed_at,
@@ -72,7 +72,9 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 						JOIN users u ON u.user_id = a.album_owner
 						JOIN users u2 ON ar.invited_id = u2.user_id
 						WHERE invited_id = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-						AND (ar.status = 'pending' OR (ar.status ='accepted') AND a.revealed_at > now() AT TIME ZONE 'utc')`
+						AND (ar.status = 'pending' OR (ar.status ='accepted') 
+						AND a.revealed_at > now() AT TIME ZONE 'utc'
+						AND a.album_owner != (SELECT user_id FROM users WHERE auth_zero_id=$1))`
 
 	rows, err := connPool.Pool.Query(ctx, queryAlbumInvites, uid)
 	if err != nil {
@@ -99,6 +101,11 @@ func QueryAlbumRequests(ctx context.Context, w http.ResponseWriter, connPool *m.
 
 func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, connPool *m.PGPool, uid string) ([]m.AlbumRequestNotification, error) {
 	var albumRequestResponses []m.AlbumRequestNotification
+
+	// Query looks for all responses to the users album invite requests - originally this was fetching all including ones
+	// the owner has already seen. Filtered out these so that we only get the ones we haven't seen yet, since we are
+	// filtering out the seen notifications - we don't need to filter the owner if its the logged in user since
+	// those will automatically be seen by default.
 	querySentAlbumInviteResponses := `SELECT ar.request_id, ar.album_id, a.album_name, a.album_cover_id, a.album_owner, 
        									u2.first_name, u2.last_name, ar.invited_id, u.first_name, u.last_name, 
        									ar.updated_at, a.revealed_at, ar.invite_seen, ar.response_seen, ar.status
@@ -107,7 +114,8 @@ func QueryAlbumRequestResponses(ctx context.Context, w http.ResponseWriter, conn
 									JOIN users u ON ar.invited_id = u.user_id
 									JOIN users u2 on a.album_owner = u2.user_id
 									WHERE (a.album_owner = (SELECT user_id FROM users WHERE auth_zero_id=$1)
-									AND ar.status='accepted')`
+									AND ar.status='accepted')
+									AND ar.response_seen = false`
 
 	rows, err := connPool.Pool.Query(ctx, querySentAlbumInviteResponses, uid)
 	if err != nil {
