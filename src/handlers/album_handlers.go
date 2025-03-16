@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"cloud.google.com/go/storage"
 	"context"
 	"encoding/json"
+	"errors"
 	"firebase.google.com/go/v4/messaging"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"io"
 	m "last_weekend_services/src/models"
@@ -15,7 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context, messagingClient *messaging.Client) http.Handler {
+func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context, messagingClient *messaging.Client, gcpStorage storage.Client, liveBucket string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -40,7 +43,7 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 
 		case http.MethodPost:
 			switch r.URL.Path {
-			case "/user/album":
+			case "/album":
 				POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
 			case "/album/guests":
 				InviteUserToAlbum(ctx, w, r, rdb, connPool, messagingClient)
@@ -56,6 +59,8 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 			}
 		case http.MethodDelete:
 			switch r.URL.Path {
+			case "/album":
+				DELETEAlbum(ctx, w, r, connPool, claims.RegisteredClaims.Subject, gcpStorage, liveBucket)
 			case "/user/album":
 				DELETEUserFromAlbum(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
@@ -65,10 +70,41 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 }
 
 func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context, authZeroID string) {
+	var hasAccess bool
 	var album m.Album
 	var guests []m.Guest
 	batch := &pgx.Batch{}
 	albumID := r.URL.Query().Get("album_id")
+
+	accessQuery := `SELECT EXISTS (
+						SELECT 1
+						FROM albums a
+						JOIN albumuser au ON a.album_id = au.album_id
+						WHERE a.album_id = $1
+						AND (
+							a.visibility = 'public'
+							OR (a.visibility = 'friends' AND EXISTS (
+								SELECT 1
+								FROM friends f
+								WHERE (f.user1_id = au.user_id AND f.user2_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+								   OR (f.user2_id = au.user_id AND f.user1_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+							))
+							OR (a.visibility = 'private' AND au.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+						)
+					) AS has_access`
+
+	err := connPool.Pool.QueryRow(ctx, accessQuery, albumID, authZeroID).Scan(&hasAccess)
+	if err != nil {
+		log.Printf("Error getting access to album: %v", err)
+		WriteResponseWithCode(w, http.StatusNotFound, "Error getting access to album")
+		return
+	}
+
+	if hasAccess == false {
+		log.Printf("User does not have access to event")
+		WriteResponseWithCode(w, http.StatusNotFound, "User does not have access to event")
+		return
+	}
 
 	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 					  FROM albums a
@@ -93,9 +129,15 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		}
 	}()
 
-	err := batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
+	err = batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
 		&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 	if err != nil {
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			WriteResponseWithCode(w, http.StatusNotFound, "Event Not Found")
+			return
+		}
+
 		log.Print(err)
 		return
 	}
@@ -557,6 +599,146 @@ func PATCHAlbumVisibility(ctx context.Context, w http.ResponseWriter, r *http.Re
 	}
 
 	w.Write([]byte("Album visibility updated"))
+}
+
+func DELETEAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, gcpStorage storage.Client, bucket string) {
+	var isOwner bool
+	var images []string
+	albumID := r.URL.Query().Get("album_id")
+	if albumID == "" {
+		log.Print("New event ID not provided")
+		WriteResponseWithCode(w, http.StatusNotFound, "Event ID not provided")
+		return
+	}
+
+	// i. Check that the user is the owner
+	ownerQuery := `SELECT EXISTS(SELECT 1 FROM albums 
+                    WHERE album_id = $1 
+                    AND album_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2))`
+	err := connPool.Pool.QueryRow(ctx, ownerQuery, albumID, uid).Scan(&isOwner)
+	if err != nil {
+		log.Print("Error querying album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error querying album owner")
+		return
+	}
+
+	if isOwner == false {
+		log.Print("Requester not current album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Requester not current album owner")
+		return
+	}
+
+	tx, err := connPool.Pool.Begin(ctx)
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error starting transaction")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Items that need to be removed
+
+	// 1. Remove the requests from the album_request table
+	arRemoveQuery := `DELETE FROM album_requests WHERE album_id = $1`
+	_, err = tx.Exec(ctx, arRemoveQuery, albumID)
+	if err != nil {
+		log.Printf("Error executing album requests query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error executing album requests query")
+		return
+	}
+
+	// May not be necessary as it could be possible that there are no requests
+	//if arRows.RowsAffected() == 0 {
+	//	log.Printf("No album requests deleted: %v", err)
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "No album requests deleted")
+	//	return
+	//}
+
+	// 2. Remove the entries from the albumuser table
+	auRemoveQuery := `DELETE FROM albumuser WHERE album_id = $1`
+	_, err = tx.Exec(ctx, auRemoveQuery, albumID)
+	if err != nil {
+		log.Printf("Error executing albumuser query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error executing albumuser query")
+		return
+	}
+
+	// 3. Remove the images related from the images
+	imageQuery := `DELETE FROM images i
+					USING imagealbum ia
+					WHERE ia.album_id = $1
+					AND i.image_id = ia.image_id
+					RETURNING i.image_id`
+	imageIDs, err := tx.Query(ctx, imageQuery, albumID)
+	if err != nil {
+		log.Printf("Error deleting images: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting images")
+		return
+	}
+	for imageIDs.Next() {
+		var image string
+		err = imageIDs.Scan(&image)
+		if err != nil {
+			log.Printf("Error scanning imageID: %v", err)
+			WriteResponseWithCode(w, http.StatusBadRequest, "Error scanning imageID")
+			return
+		}
+
+		images = append(images, image)
+	}
+
+	//4. Remove the images from related from the imagealbum table
+	//iaQuery := `DELETE FROM imagealbum WHERE album_id = $1`
+	//_, err = tx.Exec(ctx, iaQuery, albumID)
+	//if err != nil {
+	//	log.Printf("Error executing imagealbum query: %v for album: %v", err, albumID)
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "Error executing imagealbum query")
+	//	return
+	//}
+
+	// 5. Remove the album from the albums table - primary key cannot be violated
+	var albumCoverID string
+	albumDeleteQuery := `DELETE FROM albums WHERE album_id = $1 RETURNING album_cover_id`
+	err = tx.QueryRow(ctx, albumDeleteQuery, albumID).Scan(&albumCoverID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("Could not query album cover ID: %v", err)
+		} else {
+			log.Printf("Error executing event delete: %v", err)
+			WriteResponseWithCode(w, http.StatusBadRequest, "Error executing event delete")
+			return
+		}
+	}
+
+	images = append(images, albumCoverID)
+
+	// 6. Remove the image data from the cloud database (could be down through a unique function - but may need to rely
+	// on the success of the transaction first).
+	for _, image := range images {
+		smallImageID := fmt.Sprintf("%s_%d", image, 540)
+		largeImageID := fmt.Sprintf("%s_%d", image, 1080)
+
+		err = gcpStorage.Bucket(bucket).Object(image).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+		err = gcpStorage.Bucket(bucket).Object(smallImageID).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+		err = gcpStorage.Bucket(bucket).Object(largeImageID).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		log.Printf("Error commit transaction to delete the event: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error commit transaction to delete the event")
+		return
+	}
+	WriteResponseWithCode(w, http.StatusOK, "Success deleting event")
 }
 
 func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
