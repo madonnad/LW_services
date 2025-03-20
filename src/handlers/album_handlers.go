@@ -88,6 +88,7 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 								FROM friends f
 								WHERE (f.user1_id = au.user_id AND f.user2_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
 								   OR (f.user2_id = au.user_id AND f.user1_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+								   OR (au.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
 							))
 							OR (a.visibility = 'private' AND au.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
 						)
@@ -742,8 +743,6 @@ func DELETEAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, co
 }
 
 func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
-	//TODO: Update this function so that the abandon query does not remove the owner from the album - but reassigns
-	// then sets their album_request status to abandoned.
 	albumID := r.URL.Query().Get("album_id")
 	if albumID == "" {
 		log.Print("New event ID not provided")
@@ -767,7 +766,15 @@ func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Req
 					AND ia.album_id = $1
 					AND i.image_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
 
-	deletedRows, err := connPool.Pool.Exec(ctx, auLeaveQuery, albumID, uid)
+	tx, err := connPool.Pool.Begin(ctx)
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error starting transaction")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	deletedRows, err := tx.Exec(ctx, auLeaveQuery, albumID, uid)
 	if err != nil {
 		log.Printf("Error deleting user from event: %v", err)
 		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting user from event")
@@ -780,7 +787,7 @@ func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	updatedRows, err := connPool.Pool.Exec(ctx, arUpdateQuery, albumID, uid)
+	updatedRows, err := tx.Exec(ctx, arUpdateQuery, albumID, uid)
 	if err != nil {
 		log.Printf("Error updating the user album request: %v", err)
 		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting user album request")
@@ -793,16 +800,22 @@ func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	abandonedRows, err := connPool.Pool.Exec(ctx, abandonQuery, albumID, uid)
+	_, err = tx.Exec(ctx, abandonQuery, albumID, uid)
 	if err != nil {
-		log.Printf("Error deleting user from event: %v", err)
-		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting user from event")
+		log.Printf("Error with abandon image query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error with abandon image query")
 		return
 	}
 
-	if abandonedRows.RowsAffected() == 0 {
-		log.Print("User was not deleted from the event")
-		WriteResponseWithCode(w, http.StatusBadRequest, "User was not deleted from the event")
+	//if abandonedRows.RowsAffected() == 0 {
+	//	log.Print("Error abandoning images in event")
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "Error abandoning images in event")
+	//}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		log.Printf("Error committing transaction to remove user from event: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error committing transaction to remove user from event")
 		return
 	}
 
