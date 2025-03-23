@@ -120,7 +120,8 @@ func main() {
 	r.Handle("/image/like", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                         // Protected
 	r.Handle("/image/upvote", jwtMiddleware(h.ImageEndpointHandler(connPool, rdb, ctx))).Methods("POST", "DELETE")                       // Protected
 	r.Handle("/album", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("GET", "POST", "DELETE")
-	r.Handle("/album/visibility", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("PATCH")            // Protected
+	r.Handle("/album/visibility", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("PATCH")
+	r.Handle("/album/timeline", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("PATCH")              // Protected
 	r.Handle("/album/images", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("GET")                  // Protected
 	r.Handle("/album/revealed", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("GET", "POST")        // Protected
 	r.Handle("/album/guests", jwtMiddleware(h.AlbumEndpointHandler(connPool, rdb, ctx, messagingClient, *gcpStorage, storageBucket))).Methods("GET", "POST")          // Protected

@@ -56,6 +56,8 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				PATCHAlbumOwner(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/album/visibility":
 				PATCHAlbumVisibility(ctx, w, r, connPool)
+			case "/album/timeline":
+				PATCHAlbumTimeline(ctx, w, r, connPool)
 			}
 		case http.MethodDelete:
 			switch r.URL.Path {
@@ -600,6 +602,45 @@ func PATCHAlbumVisibility(ctx context.Context, w http.ResponseWriter, r *http.Re
 	}
 
 	w.Write([]byte("Album visibility updated"))
+}
+
+func PATCHAlbumTimeline(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	album := m.Album{}
+
+	bytes, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Could not read the request body")
+		log.Printf("Failed Reading Body: %v", err)
+		return
+	}
+
+	err = json.Unmarshal(bytes, &album)
+	if err != nil {
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Invalid request body - could not be mapped to object")
+		log.Printf("Failed Unmarshaling: %v", err)
+		return
+	}
+
+	updateQuery := `UPDATE albums
+					SET revealed_at = $1
+					WHERE album_id = $2`
+
+	rows, err := connPool.Pool.Exec(ctx, updateQuery, album.RevealedAt, album.AlbumID)
+	if err != nil {
+		log.Printf("Error updating event reveal date: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Error updating event reveal date")
+		return
+	}
+
+	if rows.RowsAffected() == 0 {
+		log.Printf("No event was updated: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: No event was updated")
+		return
+	}
+
+	WriteResponseWithCode(w, http.StatusOK, "Success")
+	return
 }
 
 func DELETEAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, gcpStorage storage.Client, bucket string) {
