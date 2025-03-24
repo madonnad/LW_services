@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"cloud.google.com/go/storage"
 	"context"
 	"encoding/json"
+	"errors"
 	"firebase.google.com/go/v4/messaging"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"io"
 	m "last_weekend_services/src/models"
@@ -15,7 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context, messagingClient *messaging.Client) http.Handler {
+func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Context, messagingClient *messaging.Client, gcpStorage storage.Client, liveBucket string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
 		if !ok {
@@ -32,43 +35,87 @@ func AlbumEndpointHandler(connPool *m.PGPool, rdb *redis.Client, ctx context.Con
 				GETAlbumByAlbumID(w, r, connPool, ctx, claims.RegisteredClaims.Subject)
 			case "/album/images":
 				GETAlbumImagesByID(w, r, connPool, ctx, claims.RegisteredClaims.Subject)
-			case "/album/revealed":
-				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
-			case "/album/guests":
-				GETAlbumGuests(w, r, connPool, ctx)
+				//case "/album/revealed":
+				//	GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
+				//case "/album/guests":
+				//	GETAlbumGuests(w, r, connPool, ctx)
 			}
 
 		case http.MethodPost:
 			switch r.URL.Path {
-			case "/user/album":
+			case "/album":
 				POSTNewAlbum(ctx, w, r, connPool, rdb, claims.RegisteredClaims.Subject, messagingClient)
 			case "/album/guests":
 				InviteUserToAlbum(ctx, w, r, rdb, connPool, messagingClient)
+			case "/album/revealed":
+				GETRevealedAlbumsByAlbumID(w, r, connPool, ctx)
 			}
 		case http.MethodPatch:
 			switch r.URL.Path {
+			case "/user/album":
+				PATCHAlbumOwner(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			case "/album/visibility":
 				PATCHAlbumVisibility(ctx, w, r, connPool)
+			case "/album/timeline":
+				PATCHAlbumTimeline(ctx, w, r, connPool)
+			}
+		case http.MethodDelete:
+			switch r.URL.Path {
+			case "/album":
+				DELETEAlbum(ctx, w, r, connPool, claims.RegisteredClaims.Subject, gcpStorage, liveBucket)
+			case "/user/album":
+				DELETEUserFromAlbum(ctx, w, r, connPool, claims.RegisteredClaims.Subject)
 			}
 		}
+
 	})
 }
 
 func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context, authZeroID string) {
+	var hasAccess bool
 	var album m.Album
 	var guests []m.Guest
 	batch := &pgx.Batch{}
 	albumID := r.URL.Query().Get("album_id")
 
+	accessQuery := `SELECT EXISTS (
+						SELECT 1
+						FROM albums a
+						JOIN albumuser au ON a.album_id = au.album_id
+						WHERE a.album_id = $1
+						AND (
+							a.visibility = 'public'
+							OR (a.visibility = 'friends' AND EXISTS (
+								SELECT 1
+								FROM friends f
+								WHERE (f.user1_id = au.user_id AND f.user2_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+								   OR (f.user2_id = au.user_id AND f.user1_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+								   OR (au.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+							))
+							OR (a.visibility = 'private' AND au.user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2))
+						)
+					) AS has_access`
+
+	err := connPool.Pool.QueryRow(ctx, accessQuery, albumID, authZeroID).Scan(&hasAccess)
+	if err != nil {
+		log.Printf("Error getting access to album: %v", err)
+		WriteResponseWithCode(w, http.StatusNotFound, "Error getting access to album")
+		return
+	}
+
+	if hasAccess == false {
+		log.Printf("User does not have access to event")
+		WriteResponseWithCode(w, http.StatusNotFound, "User does not have access to event")
+		return
+	}
+
 	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 					  FROM albums a
-					  JOIN albumuser au
-					  ON au.album_id=a.album_id
 					  JOIN users u
 					  ON a.album_owner=u.user_id
 					  WHERE a.album_id=$1`
 
-	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
+	guestQuery := `SELECT u.user_id, u.first_name, u.last_name, ar.status
 					FROM users u
 					JOIN album_requests ar
 					ON u.user_id = ar.invited_id
@@ -85,9 +132,15 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 		}
 	}()
 
-	err := batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
+	err = batchResults.QueryRow().Scan(&album.AlbumID, &album.AlbumName, &album.AlbumOwner, &album.OwnerFirst, &album.OwnerLast,
 		&album.CreatedAt, &album.RevealedAt, &album.AlbumCoverID, &album.Visibility)
 	if err != nil {
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			WriteResponseWithCode(w, http.StatusNotFound, "Event Not Found")
+			return
+		}
+
 		log.Print(err)
 		return
 	}
@@ -98,15 +151,18 @@ func GETAlbumByAlbumID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 	if err != nil {
 		log.Print(err)
 	}
-	guest := m.Guest{
-		ID:        album.AlbumOwner,
-		FirstName: album.OwnerFirst,
-		LastName:  album.OwnerLast,
-		Status:    "accepted",
-	}
-	guests = append(guests, guest)
+
+	// Does not require for the owner to be manually added since the owner is in album_request
+	//guest := m.Guest{
+	//	ID:        album.AlbumOwner,
+	//	FirstName: album.OwnerFirst,
+	//	LastName:  album.OwnerLast,
+	//	Status:    "accepted",
+	//}
+	//guests = append(guests, guest)
 
 	for guestRows.Next() {
+		var guest m.Guest
 		err = guestRows.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
 		if err != nil {
 			log.Print(err)
@@ -162,13 +218,11 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 
 	albumQuery := `SELECT a.album_id, album_name, album_owner, u.first_name, u.last_name, a.created_at, revealed_at, album_cover_id, visibility
 					  FROM albums a
-					  JOIN albumuser au
-					  ON au.album_id=a.album_id
 					  JOIN users u
 					  ON a.album_owner=u.user_id
 					  WHERE a.album_id=$1 AND a.revealed_at < CURRENT_DATE`
 
-	guestQuery := `SELECT u.user_id,  u.first_name, u.last_name, ar.status
+	guestQuery := `SELECT u.user_id, u.first_name, u.last_name, ar.status
 					FROM users u
 					JOIN album_requests ar
 					ON u.user_id = ar.invited_id
@@ -185,28 +239,35 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 		}
 		QueryImagesData(ctx, connPool, &album, id)
 
-		guestResponse, err := connPool.Pool.Query(ctx, guestQuery, album.AlbumID)
+		guestResponse, err := connPool.Pool.Query(ctx, guestQuery, id)
 		if err != nil {
 			log.Print(err)
 		}
 
-		guest := m.Guest{
-			ID:        album.AlbumOwner,
-			FirstName: album.OwnerFirst,
-			LastName:  album.OwnerLast,
-			Status:    "accepted",
-		}
-		guests = append(guests, guest)
+		// Deprecating because the owner is now being added into the original album_request query
+		//guest := m.Guest{
+		//	ID:        album.AlbumOwner,
+		//	FirstName: album.OwnerFirst,
+		//	LastName:  album.OwnerLast,
+		//	Status:    "accepted",
+		//}
+		//guests = append(guests, guest)
 
 		for guestResponse.Next() {
+
+			var guest m.Guest
 			err = guestResponse.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
 			if err != nil {
 				log.Print(err)
 			}
 
 			guests = append(guests, guest)
+			album.InviteList = guests
+
+			if id == "4ae4216a-5305-4d74-ba45-3af385a5d630" {
+				log.Printf("Guest: %v", len(guests))
+			}
 		}
-		album.InviteList = guests
 
 		err = album.PhaseCalculation()
 		if err != nil {
@@ -214,6 +275,7 @@ func GETRevealedAlbumsByAlbumID(w http.ResponseWriter, r *http.Request, connPool
 		}
 
 		albums = append(albums, album)
+		log.Printf("appended")
 	}
 
 	var responseBytes []byte
@@ -238,15 +300,24 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 				   ON a.album_owner=u.user_id
 				   WHERE au.user_id=(SELECT user_id FROM users WHERE auth_zero_id=$1)`
 
-	guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
-					FROM albumuser au
-					JOIN users u ON u.user_id = au.user_id
-					WHERE au.album_id = $1
-					UNION
-					SELECT u.user_id, u.first_name, u.last_name, ar.status
-					FROM album_requests ar
-					JOIN users u ON u.user_id = ar.invited_id
-					WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
+	// Original guest query before conversion to just album_requests
+	//guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
+	//				FROM albumuser au
+	//				JOIN users u ON u.user_id = au.user_id
+	//				WHERE au.album_id = $1
+	//				UNION
+	//				SELECT u.user_id, u.first_name, u.last_name, ar.status
+	//				FROM album_requests ar
+	//				JOIN users u ON u.user_id = ar.invited_id
+	//				WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
+
+	// This query fetches all albums for a user and thus getting all guests within every album - may need to remove
+	// this in the future since it can be fetched upon opening the album.
+	guestQuery := `SELECT au.invited_id, u.first_name, u.last_name, au.status
+					FROM album_requests au
+					JOIN users u
+					ON u.user_id = au.invited_id
+					WHERE au.album_id = $1`
 
 	response, err := connPool.Pool.Query(ctx, albumQuery, uid)
 	if err != nil {
@@ -289,7 +360,6 @@ func GETAlbumsByUserID(w http.ResponseWriter, r *http.Request, connPool *m.PGPoo
 
 			guests = append(guests, guest)
 			album.InviteList = guests
-
 		}
 
 		err = album.PhaseCalculation()
@@ -314,14 +384,14 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	bytes, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		WriteErrorToWriter(w, "Error: Could not read the request body")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Could not read the request body")
 		log.Printf("Failed Reading Body: %v", err)
 		return
 	}
 
 	err = json.Unmarshal(bytes, &album)
 	if err != nil {
-		WriteErrorToWriter(w, "Error: Invalid request body - could not be mapped to object")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Invalid request body - could not be mapped to object")
 		log.Printf("Failed Unmarshaling: %v", err)
 		return
 	}
@@ -332,7 +402,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	err = connPool.Pool.QueryRow(ctx, newImageQuery, uid, album.AlbumName).Scan(&album.AlbumCoverID)
 	if err != nil {
-		WriteErrorToWriter(w, "Unable to create entry in image table for album cover")
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to create entry in image table for album cover")
 		log.Printf("Unable to create entry in image table for album cover: %v", err)
 		return
 	}
@@ -344,8 +414,19 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	err = connPool.Pool.QueryRow(ctx, createAlbumQuery,
 		album.AlbumName, uid, album.AlbumCoverID, album.RevealedAt, album.Visibility).Scan(&album.AlbumID, &album.CreatedAt, &album.AlbumOwner)
 	if err != nil {
-		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
+		return
+	}
+
+	albumRequestOwnerQuery := `INSERT INTO album_requests 
+    							(album_id, invited_id, invite_seen, status, response_seen)
+    							VALUES ($1, (SELECT user_id FROM users WHERE auth_zero_id=$2), true, 'accepted', true)`
+
+	_, err = connPool.Pool.Exec(ctx, albumRequestOwnerQuery, album.AlbumID, uid)
+	if err != nil {
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to add owner album request entry to new album")
+		log.Printf("Unable to add owner album request entry to new album: %v", err)
 		return
 	}
 
@@ -355,7 +436,7 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 
 	_, err = connPool.Pool.Exec(ctx, updateAlbumUserQuery, album.AlbumID, uid)
 	if err != nil {
-		WriteErrorToWriter(w, "Unable to associate album owner to the new album")
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to associate album owner to the new album")
 		log.Printf("Unable to associate album owner to the new album: %v", err)
 		return
 	}
@@ -363,14 +444,14 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	getOwnerDetailsQuery := `SELECT first_name, last_name FROM users WHERE auth_zero_id=$1`
 	err = connPool.Pool.QueryRow(ctx, getOwnerDetailsQuery, uid).Scan(&album.OwnerFirst, &album.OwnerLast)
 	if err != nil {
-		WriteErrorToWriter(w, "Unable to create entry in albums table for new album - transaction cancelled")
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to create entry in albums table for new album - transaction cancelled")
 		log.Printf("Unable to create entry in albums table for new album: %v", err)
 		return
 	}
 
 	err = album.PhaseCalculation()
 	if err != nil {
-		WriteErrorToWriter(w, "Unable to calculate phase")
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Unable to calculate phase")
 		log.Printf("Unable to calculate phase %v", err)
 		return
 	}
@@ -392,47 +473,107 @@ func POSTNewAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 	w.Write(responseBytes)
 }
 
-func GETAlbumGuests(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
-	albumID := r.URL.Query().Get("album_id")
-	var guests []m.Guest
+//func GETAlbumGuests(w http.ResponseWriter, r *http.Request, connPool *m.PGPool, ctx context.Context) {
+//	albumID := r.URL.Query().Get("album_id")
+//	var guests []m.Guest
+//
+//	guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
+//							FROM albumuser au
+//							JOIN users u ON u.user_id = au.user_id
+//							WHERE au.album_id = $1
+//							UNION
+//							SELECT u.user_id, u.first_name, u.last_name, ar.status
+//							FROM album_requests ar
+//							JOIN users u ON u.user_id = ar.invited_id
+//							WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
+//
+//	rows, err := connPool.Pool.Query(ctx, guestQuery, albumID)
+//	if err != nil {
+//		log.Print(err)
+//		return
+//	}
+//	for rows.Next() {
+//		var guest m.Guest
+//
+//		err = rows.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
+//		if err != nil {
+//			log.Printf("Failed guests: %v", err)
+//			return
+//		}
+//
+//		guests = append(guests, guest)
+//	}
+//
+//	insertResponse, err := json.MarshalIndent(guests, "", "\t")
+//	if err != nil {
+//		log.Print(err)
+//		return
+//	}
+//	responseBytes := []byte(insertResponse)
+//
+//	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
+//	w.Write(responseBytes)
+//
+//}
 
-	guestQuery := `SELECT au.user_id, u.first_name, u.last_name, 'accepted' AS status
-							FROM albumuser au
-							JOIN users u ON u.user_id = au.user_id
-							WHERE au.album_id = $1
-							UNION
-							SELECT u.user_id, u.first_name, u.last_name, ar.status
-							FROM album_requests ar
-							JOIN users u ON u.user_id = ar.invited_id
-							WHERE ar.album_id = $1 AND ar.status IN ('pending', 'denied')`
-
-	rows, err := connPool.Pool.Query(ctx, guestQuery, albumID)
-	if err != nil {
-		log.Print(err)
+func PATCHAlbumOwner(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, authZeroID string) {
+	var isOwner bool
+	uid := r.URL.Query().Get("user_id")
+	if uid == "" {
+		log.Print("New owner ID not provided")
+		WriteResponseWithCode(w, http.StatusNotFound, "New owner ID not provided")
 		return
 	}
-	for rows.Next() {
-		var guest m.Guest
+	albumID := r.URL.Query().Get("album_id")
+	if albumID == "" {
+		log.Print("New event ID not provided")
+		WriteResponseWithCode(w, http.StatusNotFound, "Event ID not provided")
+		return
+	}
 
-		err = rows.Scan(&guest.ID, &guest.FirstName, &guest.LastName, &guest.Status)
+	ownerQuery := `SELECT EXISTS(SELECT 1 FROM albums 
+                    WHERE album_id = $1 
+                    AND album_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2))`
+	query := `UPDATE albums 
+				SET album_owner = $1 
+				WHERE album_id = $2`
+
+	rows, err := connPool.Pool.Query(ctx, ownerQuery, albumID, authZeroID)
+	if err != nil {
+		log.Print("Error querying album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error querying album owner")
+		return
+	}
+
+	for rows.Next() {
+		err = rows.Scan(&isOwner)
 		if err != nil {
-			log.Printf("Failed guests: %v", err)
+			log.Print("Error validating album owner")
+			WriteResponseWithCode(w, http.StatusBadRequest, "Error validating album owner")
 			return
 		}
-
-		guests = append(guests, guest)
 	}
 
-	insertResponse, err := json.MarshalIndent(guests, "", "\t")
-	if err != nil {
-		log.Print(err)
+	if isOwner == false {
+		log.Print("Requester not current album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Requester not current album owner")
 		return
 	}
-	responseBytes := []byte(insertResponse)
 
-	w.Header().Set("Content-Type", "application/json") //add content length number of bytes
-	w.Write(responseBytes)
+	updatedRows, err := connPool.Pool.Exec(ctx, query, uid, albumID)
+	if err != nil {
+		log.Print("Error updating event information")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error updating event information")
+		return
+	}
 
+	if updatedRows.RowsAffected() == 0 {
+		log.Print("Event was not updated")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Event was not updated")
+		return
+	}
+
+	WriteResponseWithCode(w, http.StatusOK, "Event owner updated")
 }
 
 func PATCHAlbumVisibility(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
@@ -461,6 +602,265 @@ func PATCHAlbumVisibility(ctx context.Context, w http.ResponseWriter, r *http.Re
 	}
 
 	w.Write([]byte("Album visibility updated"))
+}
+
+func PATCHAlbumTimeline(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool) {
+	album := m.Album{}
+
+	bytes, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Could not read the request body")
+		log.Printf("Failed Reading Body: %v", err)
+		return
+	}
+
+	err = json.Unmarshal(bytes, &album)
+	if err != nil {
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Invalid request body - could not be mapped to object")
+		log.Printf("Failed Unmarshaling: %v", err)
+		return
+	}
+
+	updateQuery := `UPDATE albums
+					SET revealed_at = $1
+					WHERE album_id = $2`
+
+	rows, err := connPool.Pool.Exec(ctx, updateQuery, album.RevealedAt, album.AlbumID)
+	if err != nil {
+		log.Printf("Error updating event reveal date: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: Error updating event reveal date")
+		return
+	}
+
+	if rows.RowsAffected() == 0 {
+		log.Printf("No event was updated: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error: No event was updated")
+		return
+	}
+
+	WriteResponseWithCode(w, http.StatusOK, "Success")
+	return
+}
+
+func DELETEAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string, gcpStorage storage.Client, bucket string) {
+	var isOwner bool
+	var images []string
+	albumID := r.URL.Query().Get("album_id")
+	if albumID == "" {
+		log.Print("New event ID not provided")
+		WriteResponseWithCode(w, http.StatusNotFound, "Event ID not provided")
+		return
+	}
+
+	// i. Check that the user is the owner
+	ownerQuery := `SELECT EXISTS(SELECT 1 FROM albums 
+                    WHERE album_id = $1 
+                    AND album_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2))`
+	err := connPool.Pool.QueryRow(ctx, ownerQuery, albumID, uid).Scan(&isOwner)
+	if err != nil {
+		log.Print("Error querying album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error querying album owner")
+		return
+	}
+
+	if isOwner == false {
+		log.Print("Requester not current album owner")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Requester not current album owner")
+		return
+	}
+
+	tx, err := connPool.Pool.Begin(ctx)
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error starting transaction")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Items that need to be removed
+
+	// 1. Remove the requests from the album_request table
+	arRemoveQuery := `DELETE FROM album_requests WHERE album_id = $1`
+	_, err = tx.Exec(ctx, arRemoveQuery, albumID)
+	if err != nil {
+		log.Printf("Error executing album requests query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error executing album requests query")
+		return
+	}
+
+	// May not be necessary as it could be possible that there are no requests
+	//if arRows.RowsAffected() == 0 {
+	//	log.Printf("No album requests deleted: %v", err)
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "No album requests deleted")
+	//	return
+	//}
+
+	// 2. Remove the entries from the albumuser table
+	auRemoveQuery := `DELETE FROM albumuser WHERE album_id = $1`
+	_, err = tx.Exec(ctx, auRemoveQuery, albumID)
+	if err != nil {
+		log.Printf("Error executing albumuser query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error executing albumuser query")
+		return
+	}
+
+	// 3. Remove the images related from the images
+	imageQuery := `DELETE FROM images i
+					USING imagealbum ia
+					WHERE ia.album_id = $1
+					AND i.image_id = ia.image_id
+					RETURNING i.image_id`
+	imageIDs, err := tx.Query(ctx, imageQuery, albumID)
+	if err != nil {
+		log.Printf("Error deleting images: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting images")
+		return
+	}
+	for imageIDs.Next() {
+		var image string
+		err = imageIDs.Scan(&image)
+		if err != nil {
+			log.Printf("Error scanning imageID: %v", err)
+			WriteResponseWithCode(w, http.StatusBadRequest, "Error scanning imageID")
+			return
+		}
+
+		images = append(images, image)
+	}
+
+	//4. Remove the images from related from the imagealbum table
+	//iaQuery := `DELETE FROM imagealbum WHERE album_id = $1`
+	//_, err = tx.Exec(ctx, iaQuery, albumID)
+	//if err != nil {
+	//	log.Printf("Error executing imagealbum query: %v for album: %v", err, albumID)
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "Error executing imagealbum query")
+	//	return
+	//}
+
+	// 5. Remove the album from the albums table - primary key cannot be violated
+	var albumCoverID string
+	albumDeleteQuery := `DELETE FROM albums WHERE album_id = $1 RETURNING album_cover_id`
+	err = tx.QueryRow(ctx, albumDeleteQuery, albumID).Scan(&albumCoverID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("Could not query album cover ID: %v", err)
+		} else {
+			log.Printf("Error executing event delete: %v", err)
+			WriteResponseWithCode(w, http.StatusBadRequest, "Error executing event delete")
+			return
+		}
+	}
+
+	images = append(images, albumCoverID)
+
+	// 6. Remove the image data from the cloud database (could be down through a unique function - but may need to rely
+	// on the success of the transaction first).
+	for _, image := range images {
+		smallImageID := fmt.Sprintf("%s_%d", image, 540)
+		largeImageID := fmt.Sprintf("%s_%d", image, 1080)
+
+		err = gcpStorage.Bucket(bucket).Object(image).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+		err = gcpStorage.Bucket(bucket).Object(smallImageID).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+		err = gcpStorage.Bucket(bucket).Object(largeImageID).Delete(ctx)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		log.Printf("Error commit transaction to delete the event: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error commit transaction to delete the event")
+		return
+	}
+	WriteResponseWithCode(w, http.StatusOK, "Success deleting event")
+}
+
+func DELETEUserFromAlbum(ctx context.Context, w http.ResponseWriter, r *http.Request, connPool *m.PGPool, uid string) {
+	albumID := r.URL.Query().Get("album_id")
+	if albumID == "" {
+		log.Print("New event ID not provided")
+		WriteResponseWithCode(w, http.StatusNotFound, "Event ID not provided")
+		return
+	}
+
+	auLeaveQuery := `DELETE FROM albumuser 
+       				  WHERE album_id = $1 
+       				  AND user_id = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
+
+	arUpdateQuery := `UPDATE album_requests ar
+					SET status = 'abandoned', updated_at = now() AT TIME ZONE 'utc'
+					WHERE album_id = $1
+					AND invited_id = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
+
+	abandonQuery := `UPDATE images i
+					SET abandoned = TRUE
+					FROM imagealbum ia
+					WHERE i.image_id = ia.image_id
+					AND ia.album_id = $1
+					AND i.image_owner = (SELECT user_id FROM users WHERE auth_zero_id = $2)`
+
+	tx, err := connPool.Pool.Begin(ctx)
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error starting transaction")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	deletedRows, err := tx.Exec(ctx, auLeaveQuery, albumID, uid)
+	if err != nil {
+		log.Printf("Error deleting user from event: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting user from event")
+		return
+	}
+
+	if deletedRows.RowsAffected() == 0 {
+		log.Print("User was not deleted from the event")
+		WriteResponseWithCode(w, http.StatusBadRequest, "User was not deleted from the event")
+		return
+	}
+
+	updatedRows, err := tx.Exec(ctx, arUpdateQuery, albumID, uid)
+	if err != nil {
+		log.Printf("Error updating the user album request: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error deleting user album request")
+		return
+	}
+
+	if updatedRows.RowsAffected() == 0 {
+		log.Print("Album request table was not updated")
+		WriteResponseWithCode(w, http.StatusBadRequest, "Album request table was not updated")
+		return
+	}
+
+	_, err = tx.Exec(ctx, abandonQuery, albumID, uid)
+	if err != nil {
+		log.Printf("Error with abandon image query: %v", err)
+		WriteResponseWithCode(w, http.StatusBadRequest, "Error with abandon image query")
+		return
+	}
+
+	//if abandonedRows.RowsAffected() == 0 {
+	//	log.Print("Error abandoning images in event")
+	//	WriteResponseWithCode(w, http.StatusBadRequest, "Error abandoning images in event")
+	//}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		log.Printf("Error committing transaction to remove user from event: %v", err)
+		WriteResponseWithCode(w, http.StatusInternalServerError, "Error committing transaction to remove user from event")
+		return
+	}
+
+	WriteResponseWithCode(w, http.StatusOK, "User removed from event.")
 }
 
 func WriteErrorToWriter(w http.ResponseWriter, errorString string) {

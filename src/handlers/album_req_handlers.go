@@ -63,8 +63,15 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	//addNotificationForOwner := `INSERT INTO notifications (album_id, media_id, sender_id, receiver_id, type)
 	//							VALUES ($1, $2, $3, $4, 'album_accepted')
 	//							RETURNING notification_uid, received_at, seen`
-	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
-                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
+
+	//Original Request
+	//getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1
+	//                    AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
+	getGuestsIDsAR := `SELECT invited_id
+						FROM album_requests
+						WHERE (album_id = $1
+						AND status = 'accepted'
+						AND invited_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2));`
 
 	err := connPool.Pool.QueryRow(ctx, updateReqToAccepted, notification.RequestID).Scan(&notification.AlbumID, &notification.ReceivedAt)
 	if err != nil {
@@ -81,7 +88,7 @@ func PUTAcceptAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	batch := &pgx.Batch{}
 	batch.Queue(acceptsInfoQuery, authZeroID)
 	batch.Queue(albumInfoQuery, notification.AlbumID)
-	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
+	batch.Queue(getGuestsIDsAR, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 	defer func() {
 		err := batchResults.Close()
@@ -169,8 +176,15 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 							RETURNING album_id, updated_at`
 	albumOwnerIDQuery := `SELECT album_owner FROM albums WHERE album_id = $1`
 	userInfoQuery := `SELECT user_id, first_name, last_name FROM users WHERE auth_zero_id = $1`
-	getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1 
-                                         AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
+
+	//Original Guest Query
+	//getGuestIDs := `SELECT user_id FROM albumuser WHERE (album_id = $1
+	//                                     AND user_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2))`
+	getGuestsIDsAR := `SELECT invited_id
+						FROM album_requests
+						WHERE (album_id = $1
+						AND status = 'accepted'
+						AND invited_id != (SELECT user_id FROM users WHERE users.auth_zero_id = $2));`
 
 	// Execute the delete outside of the batch since the albumOwnerIDQuery is reliant on the notification of this request
 	err := connPool.Pool.QueryRow(ctx, denyRequestQuery, requestID).Scan(&notification.AlbumID, &notification.ReceivedAt)
@@ -183,7 +197,7 @@ func DELETEDenyAlbumRequest(ctx context.Context, w http.ResponseWriter, r *http.
 	batch := &pgx.Batch{}
 	batch.Queue(albumOwnerIDQuery, &notification.AlbumID)
 	batch.Queue(userInfoQuery, authZeroID)
-	batch.Queue(getGuestIDs, notification.AlbumID, authZeroID)
+	batch.Queue(getGuestsIDsAR, notification.AlbumID, authZeroID)
 	batchResults := connPool.Pool.SendBatch(ctx, batch)
 	defer func() {
 		err := batchResults.Close()
