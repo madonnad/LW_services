@@ -913,7 +913,7 @@ func POSTNewImage(ctx context.Context, w http.ResponseWriter, r *http.Request, c
 			if caption, ok := value.(string); ok {
 				image.Caption = caption
 			} else {
-				fmt.Println("caption is not defined")
+				//fmt.Println("caption is not defined")
 			}
 		case "album_id":
 			if id, ok := value.(string); ok {

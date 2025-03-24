@@ -58,7 +58,6 @@ func GenerateAndSendSignedUrl(w http.ResponseWriter, r *http.Request, gcpStorage
 	}
 
 	url, err := gcpStorage.Bucket(bucket).SignedURL(object, opts)
-	log.Printf(url)
 	if err != nil {
 		log.Printf("Unable to generate signed URL for upload link: %v", err)
 		return
