@@ -83,7 +83,7 @@ func (connectionState *ConnectionState) ListenAndWrite(ctx context.Context, conn
 
 		select {
 		case message := <-notificationChannel:
-			log.Printf("message here")
+
 			err := sendWebSocketNotification(conn, message, uid, channel)
 			if err != nil {
 				log.Printf("ListenAndWriteError: %v", err)
